@@ -28,13 +28,17 @@ ACMA provides a daily `.rrl_update` file containing SQL `INSERT`, `UPDATE`, and 
 3.  **Execution**: The SQL statements are executed within a transaction.
 4.  **Metadata Update**: The `meta` table is updated with the new `as_of` timestamp extracted from the `-- TO:` comment in the update file.
 
-## Schema Highlights
+## Observability & Progress
 
-- **Site**: Geographic location of transmitters.
-- **Client**: License holders (individuals or companies).
-- **Licence**: Legal authorization for spectrum use.
-- **Device Details**: Technical parameters of the radio equipment (frequencies, power, bandwidth).
-- **Antenna**: Technical specifications of the antennas used.
+The ETL pipeline is instrumented to report real-time progress, which is exposed via the `sync_data` tool.
+
+### Progress Stages
+1.  **Download**: Percentage of the ZIP file retrieved from the ACMA server.
+2.  **Extraction**: Status of file decompression.
+3.  **Table Import**: For each CSV file, progress is calculated based on bytes processed relative to the file size on disk.
+4.  **Completion**: The `as_of` date is verified and stored in the `meta` table.
+
+This reporting allows clients to provide feedback to users during the initial 2-5 minute bulk import, reducing perceived latency.
 
 ## Compactness
 

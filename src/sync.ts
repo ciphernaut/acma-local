@@ -23,6 +23,22 @@ export const DEFAULT_CONFIG: SyncConfig = {
     dbPath: './data/acma.db',
 };
 
+export interface SyncStatus {
+    isSyncing: boolean;
+    progress: number; // 0-100
+    currentTable?: string;
+    lastError?: string;
+}
+
+let currentSyncStatus: SyncStatus = {
+    isSyncing: false,
+    progress: 0,
+};
+
+export function getSyncStatus(): SyncStatus {
+    return { ...currentSyncStatus };
+}
+
 /**
  * Downloads a file from a URL to a target path.
  */
@@ -40,49 +56,80 @@ async function downloadFile(url: string, targetPath: string): Promise<void> {
  * Performs a full synchronization: download, extract, and import all data.
  */
 export async function performFullSync(config: SyncConfig): Promise<void> {
-    if (!fs.existsSync(config.dataDir)) {
-        fs.mkdirSync(config.dataDir, { recursive: true });
+    if (currentSyncStatus.isSyncing) {
+        throw new Error('Synchronization already in progress');
     }
 
-    console.log('Fetching dataset timestamp...');
-    const tsResponse = await axios.get(config.timestampUrl, { responseType: 'text' });
-    const remoteTimestamp = String(tsResponse.data).trim();
+    currentSyncStatus = { isSyncing: true, progress: 0 };
 
-    const zipPathFromInput = '/projects/acma-local-redux/inputs/spectra_rrl.zip';
-    const zipPath = path.join(config.dataDir, 'spectra_rrl.zip');
-
-    if (fs.existsSync(zipPathFromInput)) {
-        console.log('Using local dataset from inputs/');
-        fs.copyFileSync(zipPathFromInput, zipPath);
-    } else {
-        console.log('Downloading full dataset...');
-        await downloadFile(config.datasetUrl, zipPath);
-    }
-
-    console.log('Extracting ZIP...');
-    const extractDir = path.join(config.dataDir, 'extracted');
-    if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
-    const files = await extractZip(zipPath, extractDir);
-
-    console.log('Initializing database...');
-    initializeDatabase(config.dbPath);
-
-    for (const file of files) {
-        const fileName = path.basename(file);
-        // client.csv -> client
-        const targetTable = fileName.split('.')[0]!;
-        if (Object.keys(TABLE_METADATA).includes(targetTable)) {
-            console.log(`Importing ${fileName}...`);
-            await importCsv(file, config.dbPath, targetTable);
+    try {
+        if (!fs.existsSync(config.dataDir)) {
+            fs.mkdirSync(config.dataDir, { recursive: true });
         }
+
+        console.log('Fetching dataset timestamp...');
+        const tsResponse = await axios.get(config.timestampUrl, { responseType: 'text' });
+        const remoteTimestamp = String(tsResponse.data).trim();
+
+        const zipPathFromInput = '/projects/acma-local-redux/inputs/spectra_rrl.zip';
+        const zipPath = path.join(config.dataDir, 'spectra_rrl.zip');
+
+        currentSyncStatus.progress = 5;
+
+        if (fs.existsSync(zipPathFromInput)) {
+            console.log('Using local dataset from inputs/');
+            fs.copyFileSync(zipPathFromInput, zipPath);
+        } else {
+            console.log('Downloading full dataset...');
+            await downloadFile(config.datasetUrl, zipPath);
+        }
+
+        currentSyncStatus.progress = 20;
+
+        console.log('Extracting ZIP...');
+        const extractDir = path.join(config.dataDir, 'extracted');
+        if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+        const files = await extractZip(zipPath, extractDir);
+
+        currentSyncStatus.progress = 30;
+
+        console.log('Initializing database...');
+        initializeDatabase(config.dbPath);
+
+        const tablesToImport = files.filter(file => {
+            const fileName = path.basename(file);
+            const targetTable = fileName.split('.')[0]!;
+            return Object.keys(TABLE_METADATA).includes(targetTable);
+        });
+
+        for (let i = 0; i < tablesToImport.length; i++) {
+            const file = tablesToImport[i]!;
+            const fileName = path.basename(file);
+            const targetTable = fileName.split('.')[0]!;
+
+            currentSyncStatus.currentTable = targetTable;
+            // Map 30-95% across table imports
+            const tableProgressBase = 30 + (i / tablesToImport.length) * 65;
+
+            console.log(`Importing ${fileName}...`);
+            await importCsv(file, config.dbPath, targetTable, (p) => {
+                currentSyncStatus.progress = Math.round(tableProgressBase + (p / tablesToImport.length) * (65 / 100));
+            });
+        }
+
+        const db = new Database(config.dbPath);
+        db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', remoteTimestamp);
+        db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
+        db.close();
+
+        currentSyncStatus.progress = 100;
+        console.log('Full sync complete.');
+    } catch (error: any) {
+        currentSyncStatus.lastError = error.message;
+        throw error;
+    } finally {
+        currentSyncStatus.isSyncing = false;
     }
-
-    const db = new Database(config.dbPath);
-    db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', remoteTimestamp);
-    db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
-    db.close();
-
-    console.log('Full sync complete.');
 }
 
 /**
@@ -141,12 +188,30 @@ export async function extractZip(zipPath: string, targetDir: string): Promise<st
  * @param dbPath Path to the SQLite database.
  * @param tableName Name of the target table.
  */
-export async function importCsv(csvPath: string, dbPath: string, tableName: string): Promise<void> {
+export async function importCsv(
+    csvPath: string,
+    dbPath: string,
+    tableName: string,
+    onProgress?: (percent: number) => void
+): Promise<void> {
     const db = new Database(dbPath);
     let insert: any = null;
     let columns: string[] = [];
 
-    const parser = fs.createReadStream(csvPath).pipe(parse({
+    // Get total size for progress estimation
+    const stats = fs.statSync(csvPath);
+    const totalBytes = stats.size;
+    let processedBytes = 0;
+
+    const readStream = fs.createReadStream(csvPath);
+    readStream.on('data', (chunk) => {
+        processedBytes += chunk.length;
+        if (onProgress) {
+            onProgress(Math.round((processedBytes / totalBytes) * 100));
+        }
+    });
+
+    const parser = readStream.pipe(parse({
         columns: true,
         skip_empty_lines: true,
         trim: true,

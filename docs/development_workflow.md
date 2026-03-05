@@ -47,6 +47,10 @@ npm test
 - **Database Schema**: `npm test tests/db.test.ts`
 - **Synchronization Logic**: `npm test tests/sync.test.ts`
 - **Search Logic**: `npm test tests/logic.test.ts`
+- **Network & SSE**: `npm test tests/network.test.ts`
+
+### Testing Network Mode
+The network tests (`tests/network.test.ts`) spawn a server instance on a specific port and use `SSEClientTransport` to verify end-to-end connectivity.
 
 ## Test Infrastructure
 

@@ -1,11 +1,12 @@
 # MCP Client Configuration
 
-The ACMA RRL MCP Server can be integrated with any MCP-compliant client (e.g., Claude Desktop, IDE extensions).
+The ACMA RRL MCP Server supports two transport modes: **Stdio** (local) and **Network (SSE/HTTP)**.
 
-## Claude Desktop Configuration
+## 1. Stdio Configuration (Local)
 
-Add the following to your `claude_desktop_config.json`:
+Best for local use with Claude Desktop or LM Studio on the same machine.
 
+### Claude Desktop / LM Studio (`mcp.json`)
 ```json
 {
   "mcpServers": {
@@ -13,33 +14,61 @@ Add the following to your `claude_desktop_config.json`:
       "command": "node",
       "args": ["/absolute/path/to/acma-local-redux/dist/index.js"],
       "env": {
-        "ACMA_DB_PATH": "/absolute/path/to/acma-local-redux/data/acma.db",
-        "ACMA_DATA_DIR": "/absolute/path/to/acma-local-redux/data"
+        "ACMA_DB_PATH": "/absolute/path/to/acma-local-redux/data/acma.db"
       }
     }
   }
 }
 ```
 
-### Parameters
+## 2. Network Mode (SSE / Streamable)
 
-- `command`: `node` is required to run the server.
-- `args`: Path to the compiled server entry point (`dist/index.js`).
-- `env`:
-    - `ACMA_DB_PATH`: Optional. Absolute path to the SQLite database.
-    - `ACMA_DATA_DIR`: Optional. Absolute path to the directory for temporary sync files.
+The "Streamable" HTTP mode is implemented via **SSE (Server-Sent Events)**. This allows for long-running operations like `sync_data` to report progress in real-time.
 
-## Initial Synchronization
+### Server Setup
+Run the server to host the network endpoint:
+```bash
+PORT=3000 npm run dev
+```
 
-The first time the server runs, it will attempt a **Full Synchronization**. This involves:
-- Downloading the 100MB ZIP file from ACMA.
-- Extracting and importing roughly 500MB of data.
+### Client Configuration (LM Studio / Claude)
+To use the network endpoint directly, configure your client to connect to the SSE URL:
 
-Depending on your internet connection and disk speed, this may take **2-5 minutes**. Subsequent runs will use the local database and perform incremental updates which are very fast.
+- **Endpoint**: `http://localhost:3000/mcp`
+- **Type**: `sse` (if requested by the client)
 
-## Verification
+### LM Studio / Claude Desktop (`mcp.json` / `config.json`)
 
-Once configured, you can verify the server by asking Claude:
-- "Search for radio sites in Sydney."
-- "What are the details for licence 1100223?"
-- "What is the database status?"
+To connect to a running server instance over the network, add this to your `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "acma-rrl-network": {
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+> [!IMPORTANT]
+> 1. The server must be running (`npm run dev`) for this to work.
+> 2. LM Studio version **0.3.17+** is required for native SSE support.
+> 3. If your client does not support the `url` key (older versions), use the **Stdio Configuration** in Section 1 instead.
+
+## 3. Sync Progress & Capabilities
+
+When using either mode, the `sync_data` tool provides enhanced feedback:
+
+- **Background Sync**: Triggering a sync returns an immediate "Sync initiated" message.
+- **Progress Polling**: Subsequent calls to `sync_data` while a sync is active will return a progress percentage (e.g., `Synchronization in progress (45%)`).
+- **Matterfront Discoverability**: Tool descriptions use structured headers (`### [Name]`) to make capabilities easier for AI models to parse.
+
+## 4. Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Port for the HTTP/SSE server (Default: `3000`). |
+| `ACMA_DB_PATH` | Absolute path to the SQLite database. |
+| `DEBUG_NETWORK` | Set to `true` to log all network traffic. |
+| `DEBUG_AUTH` | Set to `true` to log auth stub authorizations. |
