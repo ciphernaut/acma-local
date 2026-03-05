@@ -70,6 +70,12 @@ class ACMETLPipeline:
                         "licencee": row["LICENCEE"] or "",
                         "trading_name": row["TRADING_NAME"] or "",
                         "address": self._format_address(row),
+                        "abn": row.get("ABN") or "",
+                        "acn": row.get("ACN") or "",
+                        "cat_id": int(row["CAT_ID"]) if row.get("CAT_ID") else None,
+                        "client_type_id": int(row["CLIENT_TYPE_ID"])
+                        if row.get("CLIENT_TYPE_ID")
+                        else None,
                     }
                 )
 
@@ -97,6 +103,11 @@ class ACMETLPipeline:
                         if row["LONGITUDE"]
                         else None,
                         "address": row["NAME"] or "",
+                        "elevation": float(row["ELEVATION"])
+                        if row.get("ELEVATION")
+                        else None,
+                        "postcode": row.get("POSTCODE") or "",
+                        "state": row.get("STATE") or "",
                     }
                 )
 
@@ -212,6 +223,20 @@ class ACMETLPipeline:
                         "bandwidth": self._convert_bandwidth(row["BANDWIDTH"]),
                         "power": power_watts,
                         "antenna_type": row["DEVICE_TYPE"] or "",
+                        "antenna_id": row.get("ANTENNA_ID") or "",
+                        "sv_id": int(row["SV_ID"]) if row.get("SV_ID") else None,
+                        "ss_id": int(row["SS_ID"]) if row.get("SS_ID") else None,
+                        "class_of_station_code": row.get("CLASS_OF_STATION_CODE") or "",
+                        "nature_of_service_id": row.get("NATURE_OF_SERVICE_ID") or "",
+                        "sa_id": int(row["SA_ID"]) if row.get("SA_ID") else None,
+                        "tcs_id": int(row["TCS_ID"]) if row.get("TCS_ID") else None,
+                        "eqp_id": int(row["EQP_ID"]) if row.get("EQP_ID") else None,
+                        "related_efl_id": int(row["RELATED_EFL_ID"])
+                        if row.get("RELATED_EFL_ID")
+                        else None,
+                        "azimuth": float(row["AZIMUTH"]) if row.get("AZIMUTH") else None,
+                        "height": float(row["HEIGHT"]) if row.get("HEIGHT") else None,
+                        "tilt": float(row["TILT"]) if row.get("TILT") else None,
                     }
                 )
 

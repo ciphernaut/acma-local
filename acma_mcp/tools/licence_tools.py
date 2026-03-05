@@ -56,6 +56,8 @@ async def search_licences(
             l.client_no,
             c.licencee,
             c.trading_name,
+            c.abn,
+            c.acn,
             l.licence_type_name,
             l.licence_category_name,
             l.status,

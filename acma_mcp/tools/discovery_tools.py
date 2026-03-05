@@ -69,7 +69,7 @@ def register_discovery_tools(registry):
         "get_schema_info",
         get_schema_info,
         {
-            "description": "Returns the database schema for core tables (licence, client, site, device_details) to help identify searchable columns.",
+            "description": "Returns the database schema for core tables (licence, client, site, device_details, auth_spectrum_freq) to help identify searchable columns, including technical specifications and cross-references.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -81,23 +81,23 @@ def register_discovery_tools(registry):
         "get_field_values",
         get_field_values,
         {
-            "description": "Returns unique values for a specific field in a table. Useful for discovering valid filter values (e.g., license types, statuses).",
+            "description": "Returns unique values for a specific field in a table. Useful for discovering valid filter values (e.g., license types, statuses, or technical specs like class_of_station_code).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "table": {
-                        "type": "string", 
+                        "type": "string",
                         "description": "Table name (licence, client, site, device_details)",
-                        "enum": ["licence", "client", "site", "device_details"]
+                        "enum": ["licence", "client", "site", "device_details"],
                     },
                     "field": {
-                        "type": "string", 
-                        "description": "Field name to get unique values for"
+                        "type": "string",
+                        "description": "Field name to get unique values for",
                     },
                     "limit": {
-                        "type": "integer", 
+                        "type": "integer",
                         "default": 20,
-                        "description": "Maximum number of values to return"
+                        "description": "Maximum number of values to return",
                     },
                 },
                 "required": ["table", "field"],

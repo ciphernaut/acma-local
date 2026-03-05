@@ -68,10 +68,16 @@ async def find_devices_by_location(
             d.bandwidth,
             d.power,
             d.antenna_type,
+            d.azimuth,
+            d.height,
+            d.tilt,
             d.site_id,
             s.latitude,
             s.longitude,
             s.address,
+            s.elevation,
+            s.postcode,
+            s.state,
             l.licence_type_name,
             c.licencee
         FROM device_details d
@@ -122,20 +128,26 @@ async def find_devices_by_postcode(
             d.bandwidth,
             d.power,
             d.antenna_type,
+            d.azimuth,
+            d.height,
+            d.tilt,
             d.site_id,
             s.latitude,
             s.longitude,
             s.address,
+            s.elevation,
+            s.postcode,
+            s.state,
             l.licence_type_name,
             c.licencee
         FROM device_details d
         LEFT JOIN site s ON d.site_id = s.site_id
         LEFT JOIN licence l ON d.licence_no = l.licence_no
         LEFT JOIN client c ON l.client_no = c.client_no
-        WHERE s.address LIKE ?
+        WHERE s.postcode = ? OR s.address LIKE ?
         LIMIT ?
     """
-    params = (f"%{postcode}%", limit)
+    params = (postcode, f"%{postcode}%", limit)
     results = await db_manager.execute_query(query, params)
     
     return {
@@ -165,8 +177,8 @@ async def search_sites(
     params = []
     
     if postcode:
-        conditions.append("address LIKE ?")
-        params.append(f"%{postcode}%")
+        conditions.append("(postcode = ? OR address LIKE ?)")
+        params.extend([postcode, f"%{postcode}%"])
     if suburb:
         conditions.append("address LIKE ?")
         params.append(f"%{suburb}%")
@@ -177,7 +189,7 @@ async def search_sites(
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
     sql = f"""
-        SELECT site_id, latitude, longitude, address 
+        SELECT site_id, latitude, longitude, address, elevation, postcode, state 
         FROM site 
         {where_clause} 
         LIMIT ?
