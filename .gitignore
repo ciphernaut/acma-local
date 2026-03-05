@@ -1,0 +1,9 @@
+node_modules/
+data/
+scratch*/
+dist/
+.DS_Store
+*.db
+*.zip
+*.rrl_update
+extracted/
