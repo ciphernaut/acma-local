@@ -21,9 +21,9 @@ Best for local use with Claude Desktop or LM Studio on the same machine.
 }
 ```
 
-## 2. Network Mode (SSE / Streamable)
+## 2. Network Mode (SSE)
 
-The "Streamable" HTTP mode is implemented via **SSE (Server-Sent Events)**. This allows for long-running operations like `sync_data` to report progress in real-time.
+The server hosts a robust **SSE (Server-Sent Events)** endpoint. This is the recommended mode for remote clients and tools like LM Studio that require a stable network connection.
 
 ### Server Setup
 Run the server to host the network endpoint:
@@ -31,15 +31,9 @@ Run the server to host the network endpoint:
 PORT=3000 npm run dev
 ```
 
-### Client Configuration (LM Studio / Claude)
-To use the network endpoint directly, configure your client to connect to the SSE URL:
-
-- **Endpoint**: `http://localhost:3000/mcp`
-- **Type**: `sse` (if requested by the client)
-
 ### LM Studio / Claude Desktop (`mcp.json` / `config.json`)
 
-To connect to a running server instance over the network, add this to your `mcpServers` object:
+To connect over the network, add this to your `mcpServers` object:
 
 ```json
 {
