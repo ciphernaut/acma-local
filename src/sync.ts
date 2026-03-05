@@ -2,7 +2,7 @@ import AdmZip from 'adm-zip';
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
-import { parse } from 'csv-parse/sync';
+import { parse } from 'csv-parse';
 import axios from 'axios';
 import { pipeline } from 'stream/promises';
 import { initializeDatabase, TABLE_METADATA } from './db.js';
@@ -45,8 +45,8 @@ export async function performFullSync(config: SyncConfig): Promise<void> {
     }
 
     console.log('Fetching dataset timestamp...');
-    const tsResponse = await axios.get(config.timestampUrl);
-    const remoteTimestamp = tsResponse.data.trim();
+    const tsResponse = await axios.get(config.timestampUrl, { responseType: 'text' });
+    const remoteTimestamp = String(tsResponse.data).trim();
 
     const zipPathFromInput = '/projects/acma-local-redux/inputs/spectra_rrl.zip';
     const zipPath = path.join(config.dataDir, 'spectra_rrl.zip');
@@ -142,29 +142,45 @@ export async function extractZip(zipPath: string, targetDir: string): Promise<st
  * @param tableName Name of the target table.
  */
 export async function importCsv(csvPath: string, dbPath: string, tableName: string): Promise<void> {
-    const content = fs.readFileSync(csvPath);
-    const records = parse(content, {
+    const db = new Database(dbPath);
+    let insert: any = null;
+    let columns: string[] = [];
+
+    const parser = fs.createReadStream(csvPath).pipe(parse({
         columns: true,
         skip_empty_lines: true,
         trim: true,
-    });
+    }));
 
-    if (records.length === 0) return;
+    const BATCH_SIZE = 5000;
+    let batch: any[] = [];
 
-    const db = new Database(dbPath);
-    const columns = Object.keys(records[0] as object);
-    const placeholders = columns.map(() => '?').join(',');
-    const sql = `INSERT INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`;
-
-    const insert = db.prepare(sql);
-    const insertMany = db.transaction((rows: any[]) => {
+    const doBatch = db.transaction((rows: any[]) => {
         for (const row of rows) {
             const values = columns.map(col => row[col]);
             insert.run(...values);
         }
     });
 
-    insertMany(records);
+    for await (const record of parser) {
+        if (!insert) {
+            columns = Object.keys(record as object);
+            const placeholders = columns.map(() => '?').join(',');
+            const sql = `INSERT INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`;
+            insert = db.prepare(sql);
+        }
+
+        batch.push(record);
+        if (batch.length >= BATCH_SIZE) {
+            doBatch(batch);
+            batch = [];
+        }
+    }
+
+    if (batch.length > 0) {
+        doBatch(batch);
+    }
+
     db.close();
 }
 

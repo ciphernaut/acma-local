@@ -10,7 +10,8 @@
   "scripts": {
     "test": "jest",
     "dev": "tsx src/index.ts",
-    "sync": "tsx src/sync.ts"
+    "sync": "tsx src/sync.ts",
+    "build": "tsc"
   },
   "keywords": [],
   "author": "",
