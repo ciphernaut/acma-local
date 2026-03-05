@@ -9,7 +9,8 @@ Model Context Protocol server for Australian Communications and Media Authority 
 pip install -e .
 
 # Load ACMA data (requires spectra/ directory with CSV files)
-python -m acma_mcp.etl.pipeline spectra data/acma_licences.db
+# Pass --include-antenna-patterns to include the 3.8GB LICENCE_.CSV data
+python -m acma_mcp.etl.pipeline spectra data/acma_licences.db --include-antenna-patterns
 
 # Start server
 uvicorn acma_mcp.server:app --host 0.0.0.0 --port 8000
@@ -29,6 +30,7 @@ uvicorn acma_mcp.server:app --host 0.0.0.0 --port 8000
 4. **get_site_details** - Get detailed site information
 5. **analyze_spectrum_usage** - Analyze frequency band utilization
 6. **compliance_check** - Perform license compliance checks
+7. **get_antenna_pattern** - Get high-resolution antenna pattern (optional)
 
 ## Data
 

@@ -11,7 +11,7 @@ async def get_schema_info(db_manager) -> dict[str, Any]:
     Returns:
         Dictionary mapping table names to their column definitions.
     """
-    tables = ["licence", "client", "site", "device_details", "auth_spectrum_freq"]
+    tables = ["licence", "client", "site", "device_details", "auth_spectrum_freq", "antenna_pattern"]
     schema_info = {}
     
     for table in tables:
@@ -40,7 +40,7 @@ async def get_field_values(
         limit: Maximum number of values to return
     """
     # Validation to prevent SQL injection for table/field names
-    valid_tables = ["licence", "client", "site", "device_details"]
+    valid_tables = ["licence", "client", "site", "device_details", "antenna_pattern"]
     if table not in valid_tables:
         return {"error": f"Invalid table: {table}. Must be one of {valid_tables}"}
     
@@ -87,8 +87,8 @@ def register_discovery_tools(registry):
                 "properties": {
                     "table": {
                         "type": "string",
-                        "description": "Table name (licence, client, site, device_details)",
-                        "enum": ["licence", "client", "site", "device_details"],
+                        "description": "Table name (licence, client, site, device_details, antenna_pattern)",
+                        "enum": ["licence", "client", "site", "device_details", "antenna_pattern"],
                     },
                     "field": {
                         "type": "string",

@@ -55,6 +55,17 @@ async def verify():
     assert result.get("device_id") == "D1"
     assert result.get("total_points") == 1
     
+    print("\n--- Test 3: Schema Discovery ---")
+    from acma_mcp.tools.discovery_tools import get_schema_info, get_field_values
+    
+    schema_info = await get_schema_info(db_manager)
+    print(f"Tables in schema: {list(schema_info['schema'].keys())}")
+    assert "antenna_pattern" in schema_info["schema"]
+    
+    field_values = await get_field_values(db_manager, "antenna_pattern", "device_registration_id")
+    print(f"Field values for antenna_pattern: {field_values}")
+    assert "REG1" in field_values["values"]
+    
     print("\nVerification successful!")
     await db_manager.close()
     

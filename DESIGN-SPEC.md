@@ -85,6 +85,7 @@ The Oracle schema will be migrated to SQLite with the following optimizations:
    - `device_details` - Technical specifications
    - `antenna` - Antenna specifications
    - `auth_spectrum_freq` - Frequency authorizations
+   - `antenna_pattern` - High-resolution antenna power patterns (optional)
 
 ### Enhanced Schema Features
 
