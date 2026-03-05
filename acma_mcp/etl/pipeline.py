@@ -2,8 +2,9 @@
 
 import asyncio
 import csv
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import structlog
 
@@ -190,6 +191,12 @@ class ACMETLPipeline:
         devices = []
         processed_count = 0
         skipped_count = 0
+        start_time = time.time()
+
+        # Estimate total rows using file size (approximate)
+        file_size = device_file.stat().st_size
+        avg_row_size = 400  # Estimate based on typical row
+        total_rows_estimate = file_size // avg_row_size
 
         with open(device_file, encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -251,8 +258,21 @@ class ACMETLPipeline:
                     await self._bulk_insert("device_details", devices)
                     processed_count += len(devices)
                     devices = []
+                    
+                    # Log progress with ETA
+                    elapsed = time.time() - start_time
+                    rows_per_sec = processed_count / elapsed
+                    remaining_rows = total_rows_estimate - processed_count
+                    eta_sec = remaining_rows / rows_per_sec if rows_per_sec > 0 else 0
+                    percent = (processed_count / total_rows_estimate) * 100 if total_rows_estimate > 0 else 0
+                    
                     if processed_count % 50000 == 0:
-                        logger.info("Processed device details", count=processed_count)
+                        logger.info(
+                            "Processing device details", 
+                            count=processed_count, 
+                            progress=f"{percent:.1f}%",
+                            eta=f"{eta_sec/60:.1f} min"
+                        )
 
         # Process remaining records
         if devices:
@@ -318,6 +338,12 @@ class ACMETLPipeline:
         patterns = []
         processed_count = 0
         skipped_count = 0
+        start_time = time.time()
+
+        # Estimate total rows using file size
+        file_size = pattern_file.stat().st_size
+        avg_row_size = 50  # Much smaller rows for antenna patterns
+        total_rows_estimate = file_size // avg_row_size
 
         with open(pattern_file, encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -347,8 +373,21 @@ class ACMETLPipeline:
                     await self._bulk_insert("antenna_pattern", patterns)
                     processed_count += len(patterns)
                     patterns = []
+                    
+                    # Log progress with ETA
+                    elapsed = time.time() - start_time
+                    rows_per_sec = processed_count / elapsed
+                    remaining_rows = total_rows_estimate - processed_count
+                    eta_sec = remaining_rows / rows_per_sec if rows_per_sec > 0 else 0
+                    percent = (processed_count / total_rows_estimate) * 100 if total_rows_estimate > 0 else 0
+                    
                     if processed_count % 500000 == 0:
-                        logger.info("Processed antenna patterns", count=processed_count)
+                        logger.info(
+                            "Processing antenna patterns", 
+                            count=processed_count, 
+                            progress=f"{percent:.1f}%",
+                            eta=f"{eta_sec/60:.1f} min"
+                        )
 
         if patterns:
             await self._bulk_insert("antenna_pattern", patterns)
