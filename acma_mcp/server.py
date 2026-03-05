@@ -13,6 +13,7 @@ from acma_mcp.database.connection import DatabaseManager
 from acma_mcp.tools.registry import ToolRegistry
 from acma_mcp.transports.websocket import WebSocketHandler
 
+import mcp.types as types
 from mcp.server import Server as MCPServer
 from mcp.server.models import InitializationOptions
 from mcp.server.sse import SseServerTransport
@@ -46,22 +47,32 @@ async def lifespan(app: FastAPI):
 
     # Register handlers for low-level MCP server
     @mcp_server.list_tools()
-    async def handle_list_tools():
+    async def handle_list_tools() -> list[types.Tool]:
         """List tools using the registry."""
-        tools = await tool_registry.list_tools()
-        # Ensure schemas are correctly formatted for MCP
-        return tools
+        tools_data = await tool_registry.list_tools()
+        return [
+            types.Tool(
+                name=t["name"],
+                description=t.get("description", ""),
+                inputSchema=t["inputSchema"]
+            )
+            for t in tools_data
+        ]
 
     @mcp_server.call_tool()
-    async def handle_call_tool(name: str, arguments: dict | None = None):
+    async def handle_call_tool(name: str, arguments: dict | None = None) -> types.CallToolResult:
         """Call a tool using the registry."""
         try:
             result = await tool_registry.execute_tool(name, arguments or {})
-            # MCP expects content list
-            return [{"type": "text", "text": str(result)}]
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=str(result))]
+            )
         except Exception as e:
             logger.error("Tool execution failed", tool=name, error=str(e))
-            raise
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=f"Error: {str(e)}")],
+                isError=True
+            )
 
     logger.info("ACMA MCP server started successfully")
 
@@ -103,25 +114,40 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@app.get("/mcp/sse")
-async def sse_endpoint():
+class ASGIWrapper:
+    """Wrapper to ensure Starlette treats the handler as a raw ASGI app."""
+    def __init__(self, handler):
+        self.handler = handler
+
+    async def __call__(self, scope, receive, send):
+        await self.handler(scope, receive, send)
+
+
+async def sse_endpoint(scope, receive, send):
     """SSE endpoint for standard MCP connection."""
-    async with sse_transport.connect_scope() as (read_stream, write_stream):
+    async with sse_transport.connect_sse(
+        scope, receive, send
+    ) as (read_stream, write_stream):
         await mcp_server.run(
             read_stream,
             write_stream,
             InitializationOptions(
                 server_name="acma-mcp-server",
                 server_version="0.1.0",
-                capabilities=mcp_server.get_capabilities()
+                capabilities=types.ServerCapabilities(
+                    tools=types.ToolsCapability(listChanged=False)
+                )
             )
         )
 
 
-@app.post("/mcp/messages")
-async def messages_endpoint(request: Request):
+async def messages_endpoint(scope, receive, send):
     """Messages endpoint for standard MCP SSE transport."""
-    return await sse_transport.handle_post_request(request)
+    await sse_transport.handle_post_message(scope, receive, send)
+
+
+app.add_route("/mcp/sse", ASGIWrapper(sse_endpoint), methods=["GET"])
+app.add_route("/mcp/messages", ASGIWrapper(messages_endpoint), methods=["POST"])
 
 
 @app.get("/tools")
