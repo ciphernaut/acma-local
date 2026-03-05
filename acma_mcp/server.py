@@ -5,7 +5,7 @@ from typing import Any
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from acma_mcp.config import settings
@@ -13,7 +13,12 @@ from acma_mcp.database.connection import DatabaseManager
 from acma_mcp.tools.registry import ToolRegistry
 from acma_mcp.transports.websocket import WebSocketHandler
 
+from mcp.server.fastmcp import FastMCP
+
 logger = structlog.get_logger()
+
+# Initialize FastMCP for standard MCP support
+mcp_server = FastMCP("ACMA MCP Server")
 
 
 @asynccontextmanager
@@ -35,6 +40,22 @@ async def lifespan(app: FastAPI):
     # Initialize WebSocket handler
     ws_handler = WebSocketHandler(tool_registry)
     app.state.ws_handler = ws_handler
+
+    # Register tools from registry to FastMCP
+    tools = await tool_registry.list_tools()
+    for tool_def in tools:
+        name = tool_def["name"]
+        description = tool_def["description"]
+        
+        # Define a tool in FastMCP that calls our registry
+        async def call_registry_tool(t_name=name, **kwargs):
+            return await tool_registry.execute_tool(t_name, kwargs)
+            
+        mcp_server.add_tool(
+            fn=call_registry_tool,
+            name=name,
+            description=description
+        )
 
     logger.info("ACMA MCP server started successfully")
 
@@ -74,6 +95,11 @@ async def root() -> dict[str, str]:
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# Mount FastMCP SSE endpoints
+# FastMCP provides an 'sse_app' which is a standard Starlette/FastAPI app
+app.mount("/mcp", mcp_server.sse_app())
 
 
 @app.get("/tools")
