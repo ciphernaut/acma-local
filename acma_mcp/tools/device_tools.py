@@ -240,6 +240,36 @@ async def get_site_details(
     return result
 
 
+async def get_antenna_pattern(db_manager, device_id: str) -> dict[str, Any]:
+    """Get high-resolution antenna pattern data for a device if available."""
+    # Check if any data exists in antenna_pattern table
+    # We query for the device_id which is indexed
+    query = """
+        SELECT start_angle, stop_angle, power 
+        FROM antenna_pattern 
+        WHERE device_id = ?
+        ORDER BY start_angle
+    """
+    results = await db_manager.execute_query(query, (device_id,))
+
+    if not results:
+        # Check if the table even has data at all to provide better error message
+        all_count_query = "SELECT count(*) as count FROM antenna_pattern LIMIT 1"
+        count_result = await db_manager.execute_query(all_count_query)
+        if not count_result or count_result[0]["count"] == 0:
+            return {
+                "error": "Antenna pattern data was not included during the ETL process.",
+                "hint": "Run the ETL pipeline with --include-antenna-patterns to enable this data.",
+            }
+        return {"error": f"No antenna pattern data found for device {device_id}."}
+
+    return {
+        "device_id": device_id,
+        "patterns": results,
+        "total_points": len(results),
+    }
+
+
 def register_device_tools(registry):
     """Register device tools with the registry."""
     registry.register_tool(
@@ -315,6 +345,24 @@ def register_device_tools(registry):
                     },
                 },
                 "required": ["site_id"],
+            },
+        },
+    )
+
+    registry.register_tool(
+        "get_antenna_pattern",
+        get_antenna_pattern,
+        {
+            "description": "Get high-resolution antenna pattern (angle vs power) for a specific device. Note: This data may not be available if excluded during ETL.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "device_id": {
+                        "type": "string",
+                        "description": "SDD_ID of the device (antenna)",
+                    },
+                },
+                "required": ["device_id"],
             },
         },
     )

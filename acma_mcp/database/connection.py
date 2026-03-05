@@ -157,6 +157,18 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (licence_no) REFERENCES licence(licence_no)
             );
+
+            -- Antenna patterns table (HRP data)
+            CREATE TABLE IF NOT EXISTS antenna_pattern (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                device_registration_id TEXT,
+                start_angle REAL,
+                stop_angle REAL,
+                power REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (device_id) REFERENCES device_details(device_id)
+            );
         """)
 
         # Create indexes
@@ -169,6 +181,7 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_device_frequency ON device_details(frequency);
             CREATE INDEX IF NOT EXISTS idx_spectrum_licence_no ON auth_spectrum_freq(licence_no);
             CREATE INDEX IF NOT EXISTS idx_spectrum_frequency_range ON auth_spectrum_freq(frequency_start, frequency_end);
+            CREATE INDEX IF NOT EXISTS idx_antenna_pattern_device_id ON antenna_pattern(device_id);
         """)
 
         await conn.commit()

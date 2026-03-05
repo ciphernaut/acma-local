@@ -15,15 +15,17 @@ logger = structlog.get_logger()
 class ACMETLPipeline:
     """ETL pipeline for ACMA radio licensing data."""
 
-    def __init__(self, data_source_path: str, db_path: str):
+    def __init__(self, data_source_path: str, db_path: str, include_antenna_patterns: bool = False):
         """Initialize ETL pipeline.
 
         Args:
             data_source_path: Path to ACMA data directory
             db_path: Path to SQLite database
+            include_antenna_patterns: Whether to process antenna pattern data
         """
         self.data_source_path = Path(data_source_path)
         self.db_path = Path(db_path)
+        self.include_antenna_patterns = include_antenna_patterns
         self.db_manager = DatabaseManager(str(db_path))
 
     async def run_etl(self) -> None:
@@ -40,6 +42,10 @@ class ACMETLPipeline:
             await self._process_licences()
             await self._process_device_details()
             await self._process_auth_spectrum_freq()
+
+            # Process antenna patterns if requested
+            if getattr(self, "include_antenna_patterns", False):
+                await self._process_antenna_patterns()
 
             logger.info("ETL pipeline completed successfully")
 
@@ -290,6 +296,70 @@ class ACMETLPipeline:
         await self._bulk_insert("auth_spectrum_freq", spectrum_records)
         logger.info("Processed spectrum frequencies", count=len(spectrum_records))
 
+    async def _process_antenna_patterns(self) -> None:
+        """Process LICENCE_.CSV file for antenna patterns in batches."""
+        logger.info("Processing antenna patterns (HRP data)")
+
+        pattern_file = self.data_source_path / "licence" / "LICENCE_.CSV"
+        if not pattern_file.exists():
+            # Try flat structure if not in 'licence' subdir
+            pattern_file = self.data_source_path / "LICENCE_.CSV"
+
+        if not pattern_file.exists():
+            logger.warning("Antenna pattern file not found", path=str(pattern_file))
+            return
+
+        # Get valid device IDs (SDD_IDs) first to ensure referential integrity
+        async with self.db_manager.get_connection() as conn:
+            valid_devices = await conn.execute("SELECT device_id FROM device_details")
+            valid_device_set = {row[0] for row in await valid_devices.fetchall()}
+
+        batch_size = 50000
+        patterns = []
+        processed_count = 0
+        skipped_count = 0
+
+        with open(pattern_file, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                device_id = row["SDD_ID"] or ""
+
+                # Skip if device doesn't exist in device_details
+                if device_id not in valid_device_set:
+                    skipped_count += 1
+                    continue
+
+                patterns.append(
+                    {
+                        "device_id": device_id,
+                        "device_registration_id": row.get("DEVICE_REGISTRATION_IDENTIFIER"),
+                        "start_angle": float(row["START_ANGLE"])
+                        if row.get("START_ANGLE")
+                        else None,
+                        "stop_angle": float(row["STOP_ANGLE"])
+                        if row.get("STOP_ANGLE")
+                        else None,
+                        "power": float(row["POWER"]) if row.get("POWER") else None,
+                    }
+                )
+
+                if len(patterns) >= batch_size:
+                    await self._bulk_insert("antenna_pattern", patterns)
+                    processed_count += len(patterns)
+                    patterns = []
+                    if processed_count % 500000 == 0:
+                        logger.info("Processed antenna patterns", count=processed_count)
+
+        if patterns:
+            await self._bulk_insert("antenna_pattern", patterns)
+            processed_count += len(patterns)
+
+        logger.info(
+            "Processed antenna patterns completed",
+            count=processed_count,
+            skipped=skipped_count,
+        )
+
     async def _bulk_insert(self, table: str, data: list[dict[str, Any]]) -> None:
         """Bulk insert data into specified table."""
         if not data:
@@ -334,25 +404,36 @@ class ACMETLPipeline:
             return None
 
 
-async def setup_database_from_acma_data(data_source_path: str, db_path: str) -> None:
+async def setup_database_from_acma_data(
+    data_source_path: str, db_path: str, include_antenna_patterns: bool = False
+) -> None:
     """Setup database from ACMA data sources.
 
     Args:
         data_source_path: Path to ACMA data directory
         db_path: Path to SQLite database
+        include_antenna_patterns: Whether to process antenna pattern data
     """
-    pipeline = ACMETLPipeline(data_source_path, db_path)
+    pipeline = ACMETLPipeline(data_source_path, db_path, include_antenna_patterns)
     await pipeline.run_etl()
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    if len(sys.argv) != 3:
-        print("Usage: python pipeline.py <data_source_path> <db_path>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="ACMA ETL Pipeline")
+    parser.add_argument("data_path", help="Path to ACMA data directory")
+    parser.add_argument("db_path", help="Path to SQLite database")
+    parser.add_argument(
+        "--include-antenna-patterns",
+        action="store_true",
+        help="Include antenna pattern data (warning: takes a long time and lots of space)",
+    )
 
-    data_path = sys.argv[1]
-    db_path = sys.argv[2]
+    args = parser.parse_args()
 
-    asyncio.run(setup_database_from_acma_data(data_path, db_path))
+    asyncio.run(
+        setup_database_from_acma_data(
+            args.data_path, args.db_path, args.include_antenna_patterns
+        )
+    )

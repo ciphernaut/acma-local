@@ -37,6 +37,9 @@ class Settings(BaseModel):
     data_source_path: str = Field(
         default="./data/acma", description="ACMA data source path"
     )
+    include_antenna_patterns: bool = Field(
+        default=False, description="Whether to include antenna pattern data (massive)"
+    )
 
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")
@@ -58,6 +61,7 @@ class Settings(BaseModel):
             "max_memory_mb": int,
             "connection_pool_size": int,
             "rate_limit_per_minute": int,
+            "include_antenna_patterns": lambda v: v.lower() in ("true", "1", "yes"),
         }
 
         for field_name in self.__fields__:
