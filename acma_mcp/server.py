@@ -13,12 +13,15 @@ from acma_mcp.database.connection import DatabaseManager
 from acma_mcp.tools.registry import ToolRegistry
 from acma_mcp.transports.websocket import WebSocketHandler
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import Server as MCPServer
+from mcp.server.models import InitializationOptions
+from mcp.server.sse import SseServerTransport
 
 logger = structlog.get_logger()
 
-# Initialize FastMCP for standard MCP support
-mcp_server = FastMCP("ACMA MCP Server")
+# Initialize low-level MCP server
+mcp_server = MCPServer("acma-mcp-server")
+sse_transport = SseServerTransport("/mcp/messages")
 
 
 @asynccontextmanager
@@ -41,21 +44,24 @@ async def lifespan(app: FastAPI):
     ws_handler = WebSocketHandler(tool_registry)
     app.state.ws_handler = ws_handler
 
-    # Register tools from registry to FastMCP
-    tools = await tool_registry.list_tools()
-    for tool_def in tools:
-        name = tool_def["name"]
-        description = tool_def["description"]
-        
-        # Define a tool in FastMCP that calls our registry
-        async def call_registry_tool(t_name=name, **kwargs):
-            return await tool_registry.execute_tool(t_name, kwargs)
-            
-        mcp_server.add_tool(
-            fn=call_registry_tool,
-            name=name,
-            description=description
-        )
+    # Register handlers for low-level MCP server
+    @mcp_server.list_tools()
+    async def handle_list_tools():
+        """List tools using the registry."""
+        tools = await tool_registry.list_tools()
+        # Ensure schemas are correctly formatted for MCP
+        return tools
+
+    @mcp_server.call_tool()
+    async def handle_call_tool(name: str, arguments: dict | None = None):
+        """Call a tool using the registry."""
+        try:
+            result = await tool_registry.execute_tool(name, arguments or {})
+            # MCP expects content list
+            return [{"type": "text", "text": str(result)}]
+        except Exception as e:
+            logger.error("Tool execution failed", tool=name, error=str(e))
+            raise
 
     logger.info("ACMA MCP server started successfully")
 
@@ -97,9 +103,25 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-# Mount FastMCP SSE endpoints
-# FastMCP provides an 'sse_app' which is a standard Starlette/FastAPI app
-app.mount("/mcp", mcp_server.sse_app())
+@app.get("/mcp/sse")
+async def sse_endpoint():
+    """SSE endpoint for standard MCP connection."""
+    async with sse_transport.connect_scope() as (read_stream, write_stream):
+        await mcp_server.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name="acma-mcp-server",
+                server_version="0.1.0",
+                capabilities=mcp_server.get_capabilities()
+            )
+        )
+
+
+@app.post("/mcp/messages")
+async def messages_endpoint(request: Request):
+    """Messages endpoint for standard MCP SSE transport."""
+    return await sse_transport.handle_post_request(request)
 
 
 @app.get("/tools")

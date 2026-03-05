@@ -7,6 +7,8 @@ import structlog
 
 from acma_mcp.database.connection import DatabaseManager
 
+from jsonschema import validate, ValidationError
+
 logger = structlog.get_logger()
 
 
@@ -74,11 +76,19 @@ class ToolRegistry:
             Tool execution result
 
         Raises:
-            ValueError: If tool not found
+            ValueError: If tool not found or validation fails
             Exception: If tool execution fails
         """
         if name not in self._tools:
             raise ValueError(f"Tool '{name}' not found")
+
+        schema = self._tool_schemas[name].get("inputSchema")
+        if schema:
+            try:
+                validate(instance=arguments, schema=schema)
+            except ValidationError as e:
+                logger.error("Tool validation failed", name=name, error=str(e))
+                raise ValueError(f"Invalid arguments for tool '{name}': {e.message}")
 
         tool_func = self._tools[name]
         logger.info("Executing tool", name=name, arguments=arguments)
