@@ -32,11 +32,13 @@ class ToolRegistry:
         from acma_mcp.tools.device_tools import register_device_tools
         from acma_mcp.tools.licence_tools import register_licence_tools
         from acma_mcp.tools.spectrum_tools import register_spectrum_tools
+        from acma_mcp.tools.discovery_tools import register_discovery_tools
 
         register_licence_tools(self)
         register_client_tools(self)
         register_device_tools(self)
         register_spectrum_tools(self)
+        register_discovery_tools(self)
 
         logger.info("Tool registry initialized", tool_count=len(self._tools))
 

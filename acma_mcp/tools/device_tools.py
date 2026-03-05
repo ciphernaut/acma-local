@@ -105,6 +105,94 @@ async def find_devices_by_location(
     }
 
 
+async def find_devices_by_postcode(
+    db_manager, postcode: str, limit: int = 100
+) -> dict[str, Any]:
+    """Find devices at sites matching a specific postcode.
+    
+    Args:
+        postcode: Australian postcode (e.g., '4563')
+        limit: Maximum results to return
+    """
+    query = """
+        SELECT
+            d.device_id,
+            d.licence_no,
+            d.frequency,
+            d.bandwidth,
+            d.power,
+            d.antenna_type,
+            d.site_id,
+            s.latitude,
+            s.longitude,
+            s.address,
+            l.licence_type_name,
+            c.licencee
+        FROM device_details d
+        LEFT JOIN site s ON d.site_id = s.site_id
+        LEFT JOIN licence l ON d.licence_no = l.licence_no
+        LEFT JOIN client c ON l.client_no = c.client_no
+        WHERE s.address LIKE ?
+        LIMIT ?
+    """
+    params = (f"%{postcode}%", limit)
+    results = await db_manager.execute_query(query, params)
+    
+    return {
+        "postcode": postcode,
+        "devices": results,
+        "total_found": len(results),
+        "limit": limit
+    }
+
+
+async def search_sites(
+    db_manager, 
+    query: str | None = None, 
+    postcode: str | None = None, 
+    suburb: str | None = None, 
+    limit: int = 100
+) -> dict[str, Any]:
+    """Search for sites by address, postcode, or suburb.
+    
+    Args:
+        query: Generic address search string
+        postcode: Specific postcode to filter by
+        suburb: Specific suburb to filter by
+        limit: Maximum results to return
+    """
+    conditions = []
+    params = []
+    
+    if postcode:
+        conditions.append("address LIKE ?")
+        params.append(f"%{postcode}%")
+    if suburb:
+        conditions.append("address LIKE ?")
+        params.append(f"%{suburb}%")
+    if query:
+        conditions.append("address LIKE ?")
+        params.append(f"%{query}%")
+        
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+    
+    sql = f"""
+        SELECT site_id, latitude, longitude, address 
+        FROM site 
+        {where_clause} 
+        LIMIT ?
+    """
+    params.append(limit)
+    
+    results = await db_manager.execute_query(sql, tuple(params))
+    
+    return {
+        "sites": results,
+        "total_found": len(results),
+        "limit": limit
+    }
+
+
 async def get_site_details(
     db_manager, site_id: str, include_devices: bool = True
 ) -> dict[str, Any]:
@@ -146,7 +234,7 @@ def register_device_tools(registry):
         "find_devices_by_location",
         find_devices_by_location,
         {
-            "description": "Find devices within specified radius of a location",
+            "description": "Find devices within specified radius of a location (REQUIRES coordinates). Use search_sites first if you only have a postcode or suburb.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -162,6 +250,39 @@ def register_device_tools(registry):
                     },
                 },
                 "required": ["latitude", "longitude", "radius_km"],
+            },
+        },
+    )
+
+    registry.register_tool(
+        "find_devices_by_postcode",
+        find_devices_by_postcode,
+        {
+            "description": "Find devices at sites matching a specific Australian postcode.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "postcode": {"type": "string", "description": "Postcode (e.g., '4563')"},
+                    "limit": {"type": "integer", "default": 100, "description": "Maximum results"},
+                },
+                "required": ["postcode"],
+            },
+        },
+    )
+
+    registry.register_tool(
+        "search_sites",
+        search_sites,
+        {
+            "description": "Search for radio sites by address, postcode, or suburb. Useful for finding coordinates of a location.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Generic search string (e.g., street name)"},
+                    "postcode": {"type": "string", "description": "Postcode (e.g., '4563')"},
+                    "suburb": {"type": "string", "description": "Suburb name"},
+                    "limit": {"type": "integer", "default": 100, "description": "Maximum results"},
+                },
             },
         },
     )
