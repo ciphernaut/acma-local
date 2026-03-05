@@ -1,6 +1,7 @@
 # Exclude ACMA data directories that will be updated periodically
 licence/
 spectra/
+data/
 
 # Python
 __pycache__/
@@ -50,6 +51,9 @@ Thumbs.db
 logs/
 
 # Database
+data/*.db
+data/*.sqlite
+data/*.sqlite3
 *.db
 *.sqlite
 *.sqlite3
@@ -100,3 +104,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+Summary_of_Spectra_RRL_Format.csv
+.gitignore
+acma_mcp/etl/__init__.py
+Summary_of_Spectra_RRL_Format.xlsx

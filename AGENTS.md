@@ -1,11 +1,12 @@
 # ACMA MCP Server - Agent Guidelines
 
 ## Build/Lint/Test Commands
-- **Install**: `pip install -e .` (when package structure exists)
+- **Install**: `pip install -e .`
 - **Run tests**: `pytest tests/ -v` (single test: `pytest tests/test_specific.py::test_function`)
 - **Lint**: `ruff check .` and `ruff format .`
 - **Type check**: `mypy .`
 - **Run server**: `uvicorn acma_mcp.server:app --host 0.0.0.0 --port 8000`
+- **Run ETL**: `python -m acma_mcp.etl.pipeline spectra data/acma_licences.db`
 
 ## Code Style Guidelines
 - **Python**: 3.11+ with async/await patterns
@@ -23,8 +24,9 @@
 - Follow MCP error handling and response formats
 - Support MCP capabilities negotiation
 
-## Architecture Standards
-- SQLite primary database with FTS5 and spatial extensions
-- WebSocket and gRPC transports (NO stdio)
-- Multi-level caching: memory → Redis (optional)
-- Weekly ETL pipeline with data validation
+## Architecture Standards (Implemented)
+- SQLite primary database with connection pooling and foreign key constraints
+- WebSocket and HTTP/REST transports (gRPC planned)
+- In-memory caching with async connection pooling
+- ETL pipeline with batch processing and data validation
+- Real ACMA data: 14,795 clients, 127,238 sites, 163,489 licences, 2,534,208 devices

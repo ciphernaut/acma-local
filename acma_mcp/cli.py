@@ -35,6 +35,20 @@ def serve(host, port, reload):
 
 
 @cli.command()
+@click.argument("data_source", type=click.Path(exists=True))
+@click.option("--db-path", default="./data/acma_licences.db", help="Database file path")
+def etl(data_source, db_path):
+    """Run ETL pipeline to populate database from ACMA data."""
+    import asyncio
+
+    from acma_mcp.etl.pipeline import setup_database_from_acma_data
+
+    click.echo(f"Running ETL pipeline from {data_source} to {db_path}")
+    asyncio.run(setup_database_from_acma_data(data_source, db_path))
+    click.echo("ETL pipeline completed successfully!")
+
+
+@cli.command()
 def version():
     """Show version information."""
     from acma_mcp import __version__

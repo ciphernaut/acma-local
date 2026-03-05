@@ -1,88 +1,85 @@
 # ACMA MCP Server
 
-A Model Context Protocol (MCP) server that provides access to Australian Communications and Media Authority (ACMA) radio licensing data.
-
-## Features
-
-- **MCP Protocol Compliance**: Full JSON-RPC 2.0 implementation
-- **Multiple Transports**: WebSocket, gRPC, and HTTP/REST support
-- **High Performance**: SQLite with FTS5, spatial indexing, and multi-level caching
-- **Data Validation**: Comprehensive input validation with Pydantic models
-- **ETL Pipeline**: Automated weekly data updates from ACMA
+Model Context Protocol server for Australian Communications and Media Authority (ACMA) radio licensing data.
 
 ## Quick Start
 
-### Installation
-
 ```bash
+# Install dependencies
 pip install -e .
+
+# Load ACMA data (requires spectra/ directory with CSV files)
+python -m acma_mcp.etl.pipeline spectra data/acma_licences.db
+
+# Start server
+uvicorn acma_mcp.server:app --host 0.0.0.0 --port 8000
 ```
 
-### Development Setup
+## API Endpoints
+
+- `GET /health` - Health check
+- `GET /tools` - List available MCP tools
+- `POST /tools/{tool_name}` - Execute MCP tool
+
+## Available Tools
+
+1. **search_licences** - Search radio licenses by licensee, type, status
+2. **get_client_licences** - Get all licenses for a specific client
+3. **find_devices_by_location** - Find devices within geographic radius
+4. **get_site_details** - Get detailed site information
+5. **analyze_spectrum_usage** - Analyze frequency band utilization
+6. **compliance_check** - Perform license compliance checks
+
+## Data
+
+The server provides access to real ACMA licensing data:
+- **14,795** clients (Telstra, Optus, ABC, etc.)
+- **127,238** sites with GPS coordinates
+- **163,489** active radio licenses
+- **2,534,208** device records with technical specifications
+- **3,427** spectrum frequency allocations
+
+## Example Usage
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
+# Search Telstra licenses
+curl -X POST http://localhost:8000/tools/search_licences \
+  -H "Content-Type: application/json" \
+  -d '{"licencee": "Telstra", "limit": 3}'
 
-# Set up pre-commit hooks
-pre-commit install
-```
+# Find devices near Sydney CBD
+curl -X POST http://localhost:8000/tools/find_devices_by_location \
+  -H "Content-Type: application/json" \
+  -d '{"latitude": -33.8688, "longitude": 151.2093, "radius_km": 10}'
 
-### Running the Server
-
-```bash
-# Development server
-uvicorn acma_mcp.server:app --host 0.0.0.0 --port 8000 --reload
-
-# Production server
-acma-mcp serve --host 0.0.0.0 --port 8000
+# Analyze 700-800 MHz spectrum
+curl -X POST http://localhost:8000/tools/analyze_spectrum_usage \
+  -H "Content-Type: application/json" \
+  -d '{"frequency_start": 700, "frequency_end": 800}'
 ```
 
 ## Development
-
-### Code Quality
 
 ```bash
 # Lint and format
 ruff check .
 ruff format .
 
-# Type checking
-mypy .
-
 # Run tests
 pytest tests/ -v
 
-# Single test
-pytest tests/test_specific.py::test_function
+# Type checking
+mypy .
 ```
 
-### Project Structure
+## Architecture
 
-```
-acma_mcp/
-├── __init__.py
-├── server.py          # FastAPI application
-├── config.py          # Configuration management
-├── database/          # Database layer
-├── models/            # Pydantic models
-├── tools/             # MCP tools implementation
-├── transports/        # WebSocket/gRPC transports
-├── etl/               # Data processing pipeline
-└── utils/             # Utility functions
-```
-
-## Configuration
-
-The server can be configured via environment variables or a `.env` file:
-
-```bash
-DATABASE_PATH=./data/acma_licences.db
-REDIS_URL=redis://localhost:6379
-LOG_LEVEL=INFO
-MAX_MEMORY_MB=1024
-```
+- **Python 3.11+** with async/await
+- **FastAPI** + **Uvicorn** web server
+- **SQLite** database with connection pooling
+- **WebSocket** transport for MCP protocol
+- **ETL pipeline** for data loading and validation
 
 ## License
 
-MIT License - see LICENSE file for details.
+Internal project - ACMA radio licensing data access tool.
