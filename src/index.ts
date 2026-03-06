@@ -3,7 +3,8 @@
  *
  * Per-session StreamableHTTPServerTransport (official MCP multi-client pattern).
  * Full tool catalog: search_sites, search_licences, search_clients,
- *                    get_licence_details, get_site_details, sync_data.
+ *                    get_licence_details, get_site_details, sync_data,
+ *                    execute_sql, list_sample_queries, export_kml.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -18,7 +19,6 @@ import { randomUUID } from 'node:crypto';
 import {
     searchSites,
     searchLicences,
-    searchLicencesWithSites,
     searchClients,
     getLicenceDetails,
     getSiteDetails,
@@ -29,22 +29,43 @@ import { generateKml } from './kml.js';
 const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
 const PORT = process.env.PORT || 3000;
 
-// KML Results Cache (30 min TTL)
-const kmlCache = new Map<string, { kml: string, expires: number }>();
+// ─── Result Cache ────────────────────────────────────────────────────────────
+// Caches query results (columns + rows) so KML can be generated on demand
+// without re-running the query. 30-minute TTL.
 
-function cacheKml(kml: string): string {
+interface CachedResult {
+    columns: string[];
+    rows: unknown[][];
+    expires: number;
+}
+
+const resultCache = new Map<string, CachedResult>();
+
+function cacheResult(columns: string[], rows: unknown[][]): string {
     const id = randomUUID();
-    kmlCache.set(id, { kml, expires: Date.now() + 30 * 60 * 1000 });
+    resultCache.set(id, { columns, rows, expires: Date.now() + 30 * 60 * 1000 });
     return id;
 }
 
-// Cleanup expired KMLs every 5 mins
+// Cleanup expired results every 5 mins
 setInterval(() => {
     const now = Date.now();
-    for (const [id, entry] of kmlCache.entries()) {
-        if (now > entry.expires) kmlCache.delete(id);
+    for (const [id, entry] of resultCache.entries()) {
+        if (now > entry.expires) resultCache.delete(id);
     }
 }, 300_000).unref();
+
+/**
+ * Detects whether a result set contains geospatial data (lat/lng or geometry columns).
+ */
+function hasGeospatialData(columns: string[]): boolean {
+    const lCols = columns.map(c => c.toLowerCase());
+    const hasLatLng = lCols.includes('latitude') && lCols.includes('longitude');
+    const hasGeometry = lCols.includes('geometry');
+    return hasLatLng || hasGeometry;
+}
+
+// ─── DB Helper ───────────────────────────────────────────────────────────────
 
 function openDb() {
     return new Database(dbPath, { readonly: true });
@@ -52,7 +73,7 @@ function openDb() {
 
 function createServer(): Server {
     const server = new Server(
-        { name: 'acma-rrl-server', version: '1.4.0' },
+        { name: 'acma-rrl-server', version: '1.5.0' },
         { capabilities: { tools: {} } }
     );
 
@@ -77,7 +98,6 @@ Search ACMA RRL licences by licence number.
                     properties: {
                         query: { type: 'string', description: 'Licence number or partial number, e.g. "1191324"' },
                         limit: { type: 'number', description: 'Max results (default 10)' },
-                        includeKml: { type: 'boolean', description: 'If true, joins with site data and generates a KML file' },
                     },
                     required: ['query'],
                 },
@@ -90,7 +110,8 @@ Get full details for a specific licence: client info and all associated radio de
 
 ## Usage
 - Use after finding a licence number via search_licences
-- Returns: licence record, client/owner info, up to 50 device records
+- Returns: licence record, client/owner info, up to 50 device records (with site coordinates)
+- If results contain geospatial data, a result_id is returned for optional KML export via export_kml
 
 ## Input
 - licence_no: Exact licence number (e.g. "1191324/1")`,
@@ -98,7 +119,6 @@ Get full details for a specific licence: client info and all associated radio de
                     type: 'object',
                     properties: {
                         licence_no: { type: 'string', description: 'Exact licence number, e.g. "1191324/1"' },
-                        includeKml: { type: 'boolean', description: 'If true, generates a KML file mapping all devices on this licence' },
                     },
                     required: ['licence_no'],
                 },
@@ -112,6 +132,7 @@ Search transmission sites by site name or postcode.
 ## Usage
 - Use when asked about a transmitter location or site
 - Results include: SITE_ID, NAME, STATE, POSTCODE, LATITUDE, LONGITUDE
+- A result_id is returned for optional KML export via export_kml
 
 ## Input
 - query: Site name or postcode`,
@@ -120,7 +141,6 @@ Search transmission sites by site name or postcode.
                     properties: {
                         query: { type: 'string', description: 'Site name or postcode' },
                         limit: { type: 'number', description: 'Max results (default 10)' },
-                        includeKml: { type: 'boolean', description: 'If true, generates a KML file for results' },
                     },
                     required: ['query'],
                 },
@@ -134,6 +154,7 @@ Get full details for a specific site including all devices registered at that si
 ## Usage
 - Use after finding a SITE_ID via search_sites
 - Returns: site record, up to 50 associated device_details records
+- A result_id is returned for optional KML export via export_kml
 
 ## Input
 - site_id: Exact Site ID from site search results`,
@@ -141,7 +162,6 @@ Get full details for a specific site including all devices registered at that si
                     type: 'object',
                     properties: {
                         site_id: { type: 'string', description: 'Site ID, e.g. "124"' },
-                        includeKml: { type: 'boolean', description: 'If true, generates a KML file for this site' },
                     },
                     required: ['site_id'],
                 },
@@ -207,6 +227,7 @@ Run a read-only SELECT query directly against the ACMA RRL SQLite database.
 - Use list_sample_queries first if unsure what to query
 - Only SELECT statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
 - Results capped at 'limit' rows (default 100, max 500)
+- If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for optional KML export via export_kml
 
 ## Available tables
 client, licence, site, device_details, antenna, antenna_pattern, antenna_polarity,
@@ -216,7 +237,7 @@ licence_service, licence_status, licence_subservice, licensing_area,
 nature_of_service, reports_text_block, satellite, meta
 
 ## Output
-{ columns: string[], rows: any[][], truncated: boolean, rowCount: number }`,
+{ columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string }`,
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -228,32 +249,30 @@ nature_of_service, reports_text_block, satellite, meta
                             type: 'number',
                             description: 'Max rows to return (default 100, max 500)',
                         },
-                        includeKml: {
-                            type: 'boolean',
-                            description: 'If true, generates a KML file for results if geospatial data is present',
-                        },
                     },
                     required: ['sql'],
                 },
             },
             {
-                name: 'get_kml',
+                name: 'export_kml',
                 description: `
-### [KML Retrieval]
-Retrieve a KML file generated by a previous tool call.
+### [KML Export]
+Generate a KML file from cached query results.
 
 ## Usage
-- Use when an 'execute_sql' or 'search_sites' call returns a 'kml_id'
-- Returns the full KML XML content
+- Call this AFTER running a query that returned a result_id (e.g. execute_sql, search_sites, get_site_details, get_licence_details)
+- Pass the result_id from the previous query response
+- Returns full KML XML content ready for use in Google Earth or any KML viewer
+- Results are cached for 30 minutes after the original query
 
 ## Input
-- kml_id: The ID returned by the previous tool`,
+- result_id: The result_id returned by a previous query tool`,
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        kml_id: { type: 'string', description: 'The KML ID to retrieve' },
+                        result_id: { type: 'string', description: 'The result_id from a previous query response' },
                     },
-                    required: ['kml_id'],
+                    required: ['result_id'],
                 },
             },
         ],
@@ -267,23 +286,8 @@ Retrieve a KML file generated by a previous tool call.
         if (name === 'search_licences') {
             const db = openDb();
             try {
-                const includeKml = args?.includeKml as boolean | undefined;
-                const results = includeKml
-                    ? searchLicencesWithSites(db, args?.query as string, (args?.limit as number) ?? 10)
-                    : searchLicences(db, args?.query as string, (args?.limit as number) ?? 10);
-
-                let kmlId: string | undefined;
-                if (includeKml && results.length > 0) {
-                    const columns = Object.keys(results[0] as object);
-                    const rows = results.map(r => columns.map(c => (r as any)[c]));
-                    const kml = generateKml(columns, rows);
-                    kmlId = cacheKml(kml);
-                }
-
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(results, null, 2) }],
-                    _meta: kmlId ? { kml_id: kmlId } : undefined
-                };
+                const results = searchLicences(db, args?.query as string, (args?.limit as number) ?? 10);
+                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }
 
@@ -293,18 +297,20 @@ Retrieve a KML file generated by a previous tool call.
                 const result = getLicenceDetails(db, args?.licence_no as string);
                 if (!result) return { content: [{ type: 'text', text: `No licence found for: ${args?.licence_no}` }] };
 
-                let kmlId: string | undefined;
-                if (args?.includeKml && result.devices.length > 0) {
+                // Cache devices for potential KML export (devices now include site coords)
+                let resultId: string | undefined;
+                if (result.devices.length > 0) {
                     const columns = Object.keys(result.devices[0] as object);
-                    const rows = result.devices.map(r => columns.map(c => (r as any)[c]));
-                    const kml = generateKml(columns, rows);
-                    kmlId = cacheKml(kml);
+                    if (hasGeospatialData(columns)) {
+                        const rows = result.devices.map(r => columns.map(c => (r as any)[c]));
+                        resultId = cacheResult(columns, rows);
+                    }
                 }
 
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-                    _meta: kmlId ? { kml_id: kmlId } : undefined
-                };
+                const response: any = { ...result };
+                if (resultId) response.result_id = resultId;
+
+                return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }
 
@@ -313,18 +319,18 @@ Retrieve a KML file generated by a previous tool call.
             try {
                 const results = searchSites(db, args?.query as string, (args?.limit as number) ?? 10);
 
-                let kmlId: string | undefined;
-                if (args?.includeKml && results.length > 0) {
+                // Cache results for potential KML export
+                let resultId: string | undefined;
+                if (results.length > 0) {
                     const columns = Object.keys(results[0] as object);
-                    const rows = results.map(r => columns.map(c => (r as any)[c]));
-                    const kml = generateKml(columns, rows);
-                    kmlId = cacheKml(kml);
+                    if (hasGeospatialData(columns)) {
+                        const rows = results.map(r => columns.map(c => (r as any)[c]));
+                        resultId = cacheResult(columns, rows);
+                    }
                 }
 
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(results, null, 2) }],
-                    _meta: kmlId ? { kml_id: kmlId } : undefined
-                };
+                const response: any = { results, result_id: resultId };
+                return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }
 
@@ -334,18 +340,18 @@ Retrieve a KML file generated by a previous tool call.
                 const result = getSiteDetails(db, args?.site_id as string);
                 if (!result) return { content: [{ type: 'text', text: `No site found for ID: ${args?.site_id}` }] };
 
-                let kmlId: string | undefined;
-                if (args?.includeKml) {
-                    const columns = Object.keys(result.site as object);
+                // Cache site record for potential KML export
+                let resultId: string | undefined;
+                const columns = Object.keys(result.site as object);
+                if (hasGeospatialData(columns)) {
                     const rows = [columns.map(c => (result.site as any)[c])];
-                    const kml = generateKml(columns, rows);
-                    kmlId = cacheKml(kml);
+                    resultId = cacheResult(columns, rows);
                 }
 
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-                    _meta: kmlId ? { kml_id: kmlId } : undefined
-                };
+                const response: any = { ...result };
+                if (resultId) response.result_id = resultId;
+
+                return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }
 
@@ -382,16 +388,16 @@ Retrieve a KML file generated by a previous tool call.
             try {
                 const result = await executeSqlWithTimeout(dbPath, sql, limit, 25_000);
 
-                let kmlId: string | undefined;
-                if (args?.includeKml && result.rowCount > 0) {
-                    const kml = generateKml(result.columns, result.rows);
-                    kmlId = cacheKml(kml);
+                // Cache results for potential KML export if geospatial data detected
+                let resultId: string | undefined;
+                if (result.rowCount > 0 && hasGeospatialData(result.columns)) {
+                    resultId = cacheResult(result.columns, result.rows);
                 }
 
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-                    _meta: kmlId ? { kml_id: kmlId } : undefined
-                };
+                const response: any = { ...result };
+                if (resultId) response.result_id = resultId;
+
+                return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } catch (err: any) {
                 return {
                     content: [{ type: 'text', text: `SQL Error: ${err.message}` }],
@@ -400,17 +406,24 @@ Retrieve a KML file generated by a previous tool call.
             }
         }
 
-        if (name === 'get_kml') {
-            const id = args?.kml_id as string;
-            const entry = kmlCache.get(id);
-            if (!entry) {
+        if (name === 'export_kml') {
+            const id = args?.result_id as string;
+            if (!id) {
                 return {
-                    content: [{ type: 'text', text: `KML not found or expired: ${id}` }],
+                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
                     isError: true,
                 };
             }
+            const entry = resultCache.get(id);
+            if (!entry) {
+                return {
+                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
+                    isError: true,
+                };
+            }
+            const kml = generateKml(entry.columns, entry.rows);
             return {
-                content: [{ type: 'text', text: entry.kml }]
+                content: [{ type: 'text', text: kml }]
             };
         }
 
@@ -483,8 +496,8 @@ async function main() {
 
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
-        console.error(`ACMA RRL MCP Server v1.5.0 running on port ${port} at http://localhost:${port}/mcp`);
-        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries');
+        console.error(`ACMA RRL MCP Server v1.6.0 running on port ${port} at http://localhost:${port}/mcp`);
+        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml');
     });
 }
 
