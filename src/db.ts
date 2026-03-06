@@ -1,8 +1,8 @@
 import Database from 'better-sqlite3';
 
 export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: string }> = {
-    "client": {
-        "ddl": `
+  "client": {
+    "ddl": `
       CREATE TABLE IF NOT EXISTS client(
         CLIENT_NO INTEGER, LICENCEE TEXT, TRADING_NAME TEXT,
         ACN TEXT, ABN TEXT, POSTAL_STREET TEXT,
@@ -11,16 +11,16 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         CLIENT_TYPE_ID INTEGER, FEE_STATUS_ID INTEGER
       );
     `,
-        "post_load_ddl": `
+    "post_load_ddl": `
       CREATE INDEX IF NOT EXISTS client_client_no ON client(CLIENT_NO);
       CREATE INDEX IF NOT EXISTS client_client_type_idx ON client(CLIENT_TYPE_ID);
       CREATE INDEX IF NOT EXISTS client_client_cat_idx ON client(CAT_ID);
       CREATE INDEX IF NOT EXISTS client_client_fee_idx ON client(FEE_STATUS_ID);
       CREATE INDEX IF NOT EXISTS client_client_licencee_comp_idx ON client(CLIENT_NO, LICENCEE);
     `
-    },
-    "licence": {
-        "ddl": `
+  },
+  "licence": {
+    "ddl": `
       CREATE TABLE IF NOT EXISTS licence(
         LICENCE_NO TEXT, CLIENT_NO INTEGER,
         SV_ID INTEGER, SS_ID INTEGER,
@@ -32,7 +32,7 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         BSL_NO TEXT, AWL_TYPE TEXT
       );
     `,
-        "post_load_ddl": `
+    "post_load_ddl": `
       CREATE INDEX IF NOT EXISTS licence_licence_no ON licence(LICENCE_NO);
       CREATE INDEX IF NOT EXISTS licence_client_no ON licence(CLIENT_NO);
       CREATE INDEX IF NOT EXISTS licence_sv_idx ON licence(SV_ID);
@@ -40,9 +40,9 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
       CREATE INDEX IF NOT EXISTS licence_comp1_idx ON licence(SV_ID, SS_ID);
       CREATE INDEX IF NOT EXISTS licence_stats_idx ON licence(STATUS);
     `
-    },
-    "site": {
-        "ddl": `
+  },
+  "site": {
+    "ddl": `
       CREATE TABLE IF NOT EXISTS site(
         SITE_ID TEXT, LATITUDE REAL, LONGITUDE REAL,
         NAME TEXT, STATE TEXT, LICENSING_AREA_ID INTEGER,
@@ -50,15 +50,15 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         HCIS_L2 TEXT
       );
     `,
-        "post_load_ddl": `
+    "post_load_ddl": `
       CREATE INDEX IF NOT EXISTS site_site_id ON site(SITE_ID);
       CREATE INDEX IF NOT EXISTS site_state_idx ON site(STATE);
       CREATE INDEX IF NOT EXISTS site_postcode_idx ON site(POSTCODE);
       CREATE INDEX IF NOT EXISTS site_lic_area_idx ON site(LICENSING_AREA_ID);
     `
-    },
-    "device_details": {
-        "ddl": `
+  },
+  "device_details": {
+    "ddl": `
       CREATE TABLE IF NOT EXISTS device_details(
         SDD_ID INTEGER, LICENCE_NO TEXT, DEVICE_REGISTRATION_IDENTIFIER TEXT, 
         FORMER_DEVICE_IDENTIFIER TEXT, AUTHORISATION_DATE TEXT, 
@@ -80,16 +80,17 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         STATION_TYPE TEXT, STATION_NAME TEXT
       );
     `,
-        "post_load_ddl": `
+    "post_load_ddl": `
       CREATE INDEX IF NOT EXISTS device_details_sdd_idx ON device_details(SDD_ID);
       CREATE INDEX IF NOT EXISTS device_details_site_idx ON device_details(SITE_ID);
       CREATE INDEX IF NOT EXISTS device_details_antenna_idx ON device_details(ANTENNA_ID);
       CREATE INDEX IF NOT EXISTS device_details_licence_no_idx ON device_details(LICENCE_NO);
       CREATE INDEX IF NOT EXISTS device_details_efl_idx ON device_details(EFL_ID);
+      CREATE INDEX IF NOT EXISTS device_details_related_efl_idx ON device_details(RELATED_EFL_ID);
     `
-    },
-    "antenna": {
-        "ddl": `
+  },
+  "antenna": {
+    "ddl": `
       CREATE TABLE IF NOT EXISTS antenna(
         ANTENNA_ID TEXT, GAIN TEXT, FRONT_TO_BACK TEXT,
         H_BEAMWIDTH TEXT, V_BEAMWIDTH TEXT, BAND_MIN_FREQ REAL,
@@ -98,37 +99,37 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         ANTENNA_TYPE TEXT, MODEL TEXT, MANUFACTURER TEXT
       );
     `,
-        "post_load_ddl": `
+    "post_load_ddl": `
       CREATE INDEX IF NOT EXISTS antenna_antenna_id ON antenna(ANTENNA_ID);
     `
-    },
-    "meta": {
-        "ddl": `
+  },
+  "meta": {
+    "ddl": `
       CREATE TABLE IF NOT EXISTS meta(
         key TEXT PRIMARY KEY,
         value TEXT
       );
     `
-    }
+  }
 };
 
 export function initializeDatabase(dbPath: string) {
-    const db = new Database(dbPath);
+  const db = new Database(dbPath);
 
-    // WAL mode: allows concurrent readers (e.g. execute_sql worker) while a
-    // writer (e.g. sync import) holds a transaction. Without WAL, SQLite uses
-    // exclusive locks that would block the worker indefinitely during a sync.
-    db.pragma('journal_mode = WAL');
+  // WAL mode: allows concurrent readers (e.g. execute_sql worker) while a
+  // writer (e.g. sync import) holds a transaction. Without WAL, SQLite uses
+  // exclusive locks that would block the worker indefinitely during a sync.
+  db.pragma('journal_mode = WAL');
 
-    // Wrap in a transaction for performance/atomicity
-    db.transaction(() => {
-        for (const table of Object.values(TABLE_METADATA)) {
-            db.exec(table.ddl);
-            if (table.post_load_ddl) {
-                db.exec(table.post_load_ddl);
-            }
-        }
-    })();
+  // Wrap in a transaction for performance/atomicity
+  db.transaction(() => {
+    for (const table of Object.values(TABLE_METADATA)) {
+      db.exec(table.ddl);
+      if (table.post_load_ddl) {
+        db.exec(table.post_load_ddl);
+      }
+    }
+  })();
 
-    db.close();
+  db.close();
 }

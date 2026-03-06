@@ -260,7 +260,7 @@ export async function importCsv(
 
     const doBatch = db.transaction((rows: any[]) => {
         for (const row of rows) {
-            const values = columns.map(col => row[col]);
+            const values = columns.map(col => row[col] === '' ? null : row[col]);
             insert.run(...values);
         }
     });
