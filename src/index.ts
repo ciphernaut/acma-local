@@ -1,5 +1,12 @@
+/**
+ * ACMA RRL MCP Server - Network Mode
+ *
+ * Per-session StreamableHTTPServerTransport (official MCP multi-client pattern).
+ * Full tool catalog: search_sites, search_licences, search_clients,
+ *                    get_licence_details, get_site_details, sync_data.
+ */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
@@ -7,46 +14,131 @@ import {
 import Database from 'better-sqlite3';
 import { DEFAULT_CONFIG, sync, getSyncStatus } from './sync.js';
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import {
     searchSites,
+    searchLicences,
+    searchClients,
+    getLicenceDetails,
+    getSiteDetails,
 } from './logic.js';
 
 const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
 const PORT = process.env.PORT || 3000;
 
-/**
- * Global session map to track multiple SSE connections.
- */
-const sessions = new Map<string, SSEServerTransport>();
+function openDb() {
+    return new Database(dbPath, { readonly: true });
+}
 
-export const server = new Server(
-    {
-        name: 'acma-rrl-server',
-        version: '1.2.6',
-    },
-    {
-        capabilities: {
-            tools: {},
-        },
-    }
-);
+function createServer(): Server {
+    const server = new Server(
+        { name: 'acma-rrl-server', version: '1.4.0' },
+        { capabilities: { tools: {} } }
+    );
 
-/**
- * List available tools with structured headers for optimal discoverability.
- */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
+    // ─── Tool Catalog ───────────────────────────────────────────────────────────
+
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: [
+            {
+                name: 'search_licences',
+                description: `
+### [Licence Search] PRIMARY SEARCH TOOL
+Search ACMA RRL licences by licence number.
+
+## Usage
+- Use this first when given a licence number (e.g. "1191324/1", "1191324")
+- Results include: LICENCE_NO, STATUS, LICENCE_TYPE_NAME, CLIENT_NO, DATE_OF_EXPIRY
+
+## Input
+- query: Licence number or partial number`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        query: { type: 'string', description: 'Licence number or partial number, e.g. "1191324"' },
+                        limit: { type: 'number', description: 'Max results (default 10)' },
+                    },
+                    required: ['query'],
+                },
+            },
+            {
+                name: 'get_licence_details',
+                description: `
+### [Licence Details]
+Get full details for a specific licence: client info and all associated radio devices.
+
+## Usage
+- Use after finding a licence number via search_licences
+- Returns: licence record, client/owner info, up to 50 device records
+
+## Input
+- licence_no: Exact licence number (e.g. "1191324/1")`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        licence_no: { type: 'string', description: 'Exact licence number, e.g. "1191324/1"' },
+                    },
+                    required: ['licence_no'],
+                },
+            },
             {
                 name: 'search_sites',
                 description: `
 ### [Site Search]
-Search for radio transmission sites by name or postcode.
-Details: Provides location and license information for transmitters.`,
+Search transmission sites by site name or postcode.
+
+## Usage
+- Use when asked about a transmitter location or site
+- Results include: SITE_ID, NAME, STATE, POSTCODE, LATITUDE, LONGITUDE
+
+## Input
+- query: Site name or postcode`,
                 inputSchema: {
                     type: 'object',
                     properties: {
                         query: { type: 'string', description: 'Site name or postcode' },
+                        limit: { type: 'number', description: 'Max results (default 10)' },
+                    },
+                    required: ['query'],
+                },
+            },
+            {
+                name: 'get_site_details',
+                description: `
+### [Site Details]
+Get full details for a specific site including all devices registered at that site.
+
+## Usage
+- Use after finding a SITE_ID via search_sites
+- Returns: site record, up to 50 associated device_details records
+
+## Input
+- site_id: Exact Site ID from site search results`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        site_id: { type: 'string', description: 'Site ID, e.g. "124"' },
+                    },
+                    required: ['site_id'],
+                },
+            },
+            {
+                name: 'search_clients',
+                description: `
+### [Client / Licensee Search]
+Search for licence holders (clients) by company name or trading name.
+
+## Usage
+- Use when asked about who holds licences, e.g. "who operates on this frequency?"
+- Results include: CLIENT_NO, LICENCEE, TRADING_NAME, ABN, ACN, STATE
+
+## Input
+- query: Business name or trading name`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        query: { type: 'string', description: 'Licensee or trading name' },
+                        limit: { type: 'number', description: 'Max results (default 10)' },
                     },
                     required: ['query'],
                 },
@@ -55,106 +147,156 @@ Details: Provides location and license information for transmitters.`,
                 name: 'sync_data',
                 description: `
 ### [Data Synchronization]
-Trigger or check the status of a synchronization with the ACMA RRL database.
-Details: Sync runs in background. Polling this tool returns progress percentage.`,
+Download and import the latest ACMA RRL dataset. Safe to call while server is running.
+
+## Usage
+- Call once to start sync, then poll to check progress
+- Returns progress percentage while syncing
+
+## Status fields
+- progress: 0-100%
+- currentTable: which CSV is being imported`,
                 inputSchema: { type: 'object', properties: {} },
             },
         ],
-    };
-});
+    }));
 
-/**
- * Combined tool handlers.
- */
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name === 'sync_data') {
-        const status = getSyncStatus();
-        if (status.isSyncing) {
-            return { content: [{ type: 'text', text: `Synchronization is currently in progress (${status.progress}%). Please try again soon. Current step: ${status.currentTable ?? 'Initializing'}.` }] };
+    // ─── Tool Handlers ──────────────────────────────────────────────────────────
+
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+
+        if (name === 'search_licences') {
+            const db = openDb();
+            try {
+                const results = searchLicences(db, args?.query as string, (args?.limit as number) ?? 10);
+                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+            } finally { if (db.open) db.close(); }
         }
-        // Start sync in background
-        sync(DEFAULT_CONFIG).catch(err => console.error('[SYNC] Background Error:', err));
-        return { content: [{ type: 'text', text: 'Synchronization started. You can poll this tool again to see progress.' }] };
-    }
 
-    if (request.params.name === 'search_sites') {
-        const query = request.params.arguments?.query as string;
-        const db = new Database(dbPath, { readonly: true });
-        try {
-            const results = searchSites(db, query, 5);
-            return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
-        } finally {
-            if (db.open) db.close();
+        if (name === 'get_licence_details') {
+            const db = openDb();
+            try {
+                const result = getLicenceDetails(db, args?.licence_no as string);
+                if (!result) return { content: [{ type: 'text', text: `No licence found for: ${args?.licence_no}` }] };
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } finally { if (db.open) db.close(); }
         }
-    }
 
-    return { content: [{ type: 'text', text: `Tool not found: ${request.params.name}` }], isError: true };
-});
+        if (name === 'search_sites') {
+            const db = openDb();
+            try {
+                const results = searchSites(db, args?.query as string, (args?.limit as number) ?? 10);
+                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+            } finally { if (db.open) db.close(); }
+        }
+
+        if (name === 'get_site_details') {
+            const db = openDb();
+            try {
+                const result = getSiteDetails(db, args?.site_id as string);
+                if (!result) return { content: [{ type: 'text', text: `No site found for ID: ${args?.site_id}` }] };
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } finally { if (db.open) db.close(); }
+        }
+
+        if (name === 'search_clients') {
+            const db = openDb();
+            try {
+                const results = searchClients(db, args?.query as string, (args?.limit as number) ?? 10);
+                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+            } finally { if (db.open) db.close(); }
+        }
+
+        if (name === 'sync_data') {
+            const status = getSyncStatus();
+            if (status.isSyncing) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Sync in progress: ${status.progress}% — step: ${status.currentTable ?? 'Initializing'}. Poll again soon.`
+                    }]
+                };
+            }
+            sync(DEFAULT_CONFIG).catch(err => console.error('[SYNC] Error:', err));
+            return { content: [{ type: 'text', text: 'Sync started. Call sync_data again to check progress.' }] };
+        }
+
+        return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
+    });
+
+    return server;
+}
+
+// ─── HTTP Server ─────────────────────────────────────────────────────────────
+
+const transports = new Map<string, StreamableHTTPServerTransport>();
 
 async function main() {
     const app = express();
-
-    // Body parsing middleware (required for POST handlePostMessage)
     app.use(express.json());
 
-    app.get('/health', (req, res) => res.send('OK'));
+    app.get('/health', (_req, res) => res.send('OK'));
 
-    /**
-     * SSE endpoint: Establish the persistent connection.
-     */
-    app.get('/mcp', async (req, res) => {
+    app.all('/mcp', async (req, res) => {
         if (process.env.DEBUG_NETWORK) {
-            console.error(`[NETWORK] New SSE Connection: ${req.url}`);
+            console.error(`[NETWORK] ${req.method} | session=${req.headers['mcp-session-id'] ?? 'none'}`);
         }
 
-        // SSEServerTransport handles the initial GET to /mcp
-        const transport = new SSEServerTransport('/mcp', res);
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-        // Track the session
-        const sessionId = transport.sessionId;
-        sessions.set(sessionId, transport);
-
-        transport.onclose = () => {
-            if (process.env.DEBUG_NETWORK) {
-                console.error(`[NETWORK] SSE Session ${sessionId} closed.`);
+        // Route to existing session
+        if (sessionId && transports.has(sessionId)) {
+            try {
+                await transports.get(sessionId)!.handleRequest(req, res, req.body);
+            } catch (err: any) {
+                console.error('[MCP] Transport error:', err.message);
+                if (!res.headersSent) res.status(500).json({ error: err.message });
             }
-            sessions.delete(sessionId);
-        };
-
-        // connect() automatically calls transport.start()
-        await server.connect(transport);
-    });
-
-    /**
-     * POST endpoint: Receive messages for an existing SSE session.
-     */
-    app.post('/mcp', async (req, res) => {
-        const sessionId = req.query.sessionId as string;
-        const transport = sessions.get(sessionId);
-
-        if (!transport) {
-            console.error(`[NETWORK] Session not found: ${sessionId}`);
-            res.status(404).send('Session not found');
             return;
         }
 
-        try {
-            await transport.handlePostMessage(req, res);
-        } catch (err: any) {
-            console.error(`[NETWORK] POST error for session ${sessionId}:`, err);
-            if (!res.headersSent) {
-                res.status(500).send(err.message);
+        // New session — only POST initialize can start one
+        if (req.method === 'POST') {
+            const transport = new StreamableHTTPServerTransport({
+                sessionIdGenerator: () => randomUUID(),
+                onsessioninitialized: (newId) => {
+                    transports.set(newId, transport);
+                    console.error(`[SESSION] Opened: ${newId}`);
+                },
+            });
+
+            transport.onclose = () => {
+                if (transport.sessionId) {
+                    transports.delete(transport.sessionId);
+                    console.error(`[SESSION] Closed: ${transport.sessionId}`);
+                }
+            };
+
+            await createServer().connect(transport);
+
+            try {
+                await transport.handleRequest(req, res, req.body);
+            } catch (err: any) {
+                console.error('[MCP] Init error:', err.message);
+                if (!res.headersSent) res.status(500).json({ error: err.message });
             }
+            return;
         }
+
+        res.status(400).json({
+            error: 'Send POST /mcp with initialize to start a session first.',
+        });
     });
 
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
-        console.error(`ACMA RRL MCP Server running on http://0.0.0.0:${port}/mcp (Robust SSE mode)`);
+        console.error(`ACMA RRL MCP Server v1.4.0 at http://localhost:${port}/mcp`);
+        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data');
     });
 }
 
-main().catch(error => {
-    console.error('Fatal initialization error:', error);
+main().catch(err => {
+    console.error('Fatal error:', err);
     process.exit(1);
 });

@@ -21,34 +21,39 @@ Best for local use with Claude Desktop or LM Studio on the same machine.
 }
 ```
 
-## 2. Network Mode (SSE)
+## 2. Network Mode (Streamable HTTP)
 
-The server hosts a robust **SSE (Server-Sent Events)** endpoint. This is the recommended mode for remote clients and tools like LM Studio that require a stable network connection.
+The server implements the **Streamable HTTP** MCP transport. This is the modern MCP standard and is compatible with LM Studio's SSE bridge.
+
+### How It Works
+
+The MCP Streamable HTTP protocol uses a **POST-first initialization** flow:
+1. Client `POST /mcp` with `initialize` → server responds with `Mcp-Session-Id` header
+2. Client `GET /mcp` with `Mcp-Session-Id` → opens the SSE notification stream
+3. Subsequent messages `POST /mcp` with `Mcp-Session-Id` header
 
 ### Server Setup
-Run the server to host the network endpoint:
 ```bash
 PORT=3000 npm run dev
 ```
 
-### LM Studio / Claude Desktop (`mcp.json` / `config.json`)
-
-To connect over the network, add this to your `mcpServers` object:
+### LM Studio / Claude Desktop (`mcp.json`)
 
 ```json
 {
   "mcpServers": {
     "acma-rrl-network": {
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3000/mcp",
+      "type": "streamable"
     }
   }
 }
 ```
 
 > [!IMPORTANT]
-> 1. The server must be running (`npm run dev`) for this to work.
-> 2. LM Studio version **0.3.17+** is required for native SSE support.
-> 3. If your client does not support the `url` key (older versions), use the **Stdio Configuration** in Section 1 instead.
+> 1. The server must be running (`npm run dev`) before connecting.
+> 2. LM Studio version **0.3.17+** is required for native Streamable HTTP support.
+> 3. Use `"type": "streamable"` — this is the correct transport for this server.
 
 ## 3. Sync Progress & Capabilities
 
