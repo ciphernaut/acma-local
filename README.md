@@ -62,7 +62,19 @@ The dataset is updated daily by ACMA. To keep your local mirror fresh, you can c
 - `npm run dev`: Start the server in development mode.
 - `npm run test`: Run the test suite (Jest).
 
+## Attribution
+
+Based on Australian Communications and Media Authority information.
+
+## Data Source & Extraction
+
+This project provides a local mirror of the [ACMA Register of Radiocommunications Licences (RRL)](https://www.acma.gov.au/radiocomms-licence-data). 
+
+The server implementation is based on the logic and data structures of the [ACMA Offline RRL](https://web.acma.gov.au/offline-rrl/index.html) web application. The core logic for data synchronization and SQL query generation was reverse-engineered from the original ACMA JavaScript implementation to ensure compatibility and accuracy.
+
 ## License
 
-Creative Commons Attribution 4.0 International (ACMA Data).
-Implementation: MIT.
+This software and the associated RRL data are licensed under the [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) license.
+
+- **ACMA Data**: © Australian Communications and Media Authority.
+- **Implementation**: Creative Commons Attribution 4.0 International.
