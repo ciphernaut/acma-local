@@ -22,6 +22,7 @@ import {
     getLicenceDetails,
     getSiteDetails,
 } from './logic.js';
+import { executeSql, listSampleQueries } from './sql.js';
 
 const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
 const PORT = process.env.PORT || 3000;
@@ -158,6 +159,56 @@ Download and import the latest ACMA RRL dataset. Safe to call while server is ru
 - currentTable: which CSV is being imported`,
                 inputSchema: { type: 'object', properties: {} },
             },
+            {
+                name: 'list_sample_queries',
+                description: `
+### [SQL Sample Queries]
+Returns 44 named example SQL queries from the ACMA RRL database.
+
+## Usage
+- Call this first to discover what SQL queries are available
+- Use the returned queries as templates or run them directly with execute_sql
+- Covers: licence counts, assignments by frequency/postcode, site/client searches, licensing statistics, satellite data and more
+
+## Output
+Array of { description, query } objects`,
+                inputSchema: { type: 'object', properties: {} },
+            },
+            {
+                name: 'execute_sql',
+                description: `
+### [SQL Query Executor]
+Run a read-only SELECT query directly against the ACMA RRL SQLite database.
+
+## Usage
+- Use list_sample_queries first if unsure what to query
+- Only SELECT statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
+- Results capped at 'limit' rows (default 100, max 500)
+
+## Available tables
+client, licence, site, device_details, antenna, antenna_pattern, antenna_polarity,
+access_area, applic_text_block, auth_spectrum_area, auth_spectrum_freq,
+bsl, bsl_area, class_of_station, client_type, fee_status, industry_cat,
+licence_service, licence_status, licence_subservice, licensing_area,
+nature_of_service, reports_text_block, satellite, meta
+
+## Output
+{ columns: string[], rows: any[][], truncated: boolean, rowCount: number }`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        sql: {
+                            type: 'string',
+                            description: 'A SELECT SQL query to run against the ACMA RRL database',
+                        },
+                        limit: {
+                            type: 'number',
+                            description: 'Max rows to return (default 100, max 500)',
+                        },
+                    },
+                    required: ['sql'],
+                },
+            },
         ],
     }));
 
@@ -220,6 +271,28 @@ Download and import the latest ACMA RRL dataset. Safe to call while server is ru
             }
             sync(DEFAULT_CONFIG).catch(err => console.error('[SYNC] Error:', err));
             return { content: [{ type: 'text', text: 'Sync started. Call sync_data again to check progress.' }] };
+        }
+
+        if (name === 'list_sample_queries') {
+            const queries = listSampleQueries();
+            return { content: [{ type: 'text', text: JSON.stringify(queries, null, 2) }] };
+        }
+
+        if (name === 'execute_sql') {
+            const sql = args?.sql as string;
+            const limit = (args?.limit as number) ?? 100;
+            const db = openDb();
+            try {
+                const result = executeSql(db, sql, limit);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (err: any) {
+                return {
+                    content: [{ type: 'text', text: `SQL Error: ${err.message}` }],
+                    isError: true,
+                };
+            } finally {
+                if (db.open) db.close();
+            }
         }
 
         return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
@@ -291,8 +364,8 @@ async function main() {
 
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
-        console.error(`ACMA RRL MCP Server v1.4.0 at http://localhost:${port}/mcp`);
-        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data');
+        console.error(`ACMA RRL MCP Server v1.5.0 running on port ${port} at http://localhost:${port}/mcp`);
+        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries');
     });
 }
 
