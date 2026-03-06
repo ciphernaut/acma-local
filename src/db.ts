@@ -115,6 +115,11 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
 export function initializeDatabase(dbPath: string) {
     const db = new Database(dbPath);
 
+    // WAL mode: allows concurrent readers (e.g. execute_sql worker) while a
+    // writer (e.g. sync import) holds a transaction. Without WAL, SQLite uses
+    // exclusive locks that would block the worker indefinitely during a sync.
+    db.pragma('journal_mode = WAL');
+
     // Wrap in a transaction for performance/atomicity
     db.transaction(() => {
         for (const table of Object.values(TABLE_METADATA)) {

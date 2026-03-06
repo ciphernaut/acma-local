@@ -107,7 +107,7 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         expect(data.truncated).toBe(false);
 
         await transport.close();
-    }, 15000);
+    }, 45000);
 
     test('execute_sql rejects non-SELECT statements', async () => {
         const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
@@ -122,5 +122,5 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         expect(result.content[0].text).toMatch(/SELECT/i);
 
         await transport.close();
-    }, 15000);
+    }, 45000);
 });

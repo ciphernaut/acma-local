@@ -1,4 +1,12 @@
 import Database from 'better-sqlite3';
+import { Worker } from 'worker_threads';
+import { fileURLToPath } from 'url';
+import * as path from 'path';
+import * as fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 
 export interface SqlResult {
     columns: string[];
@@ -383,4 +391,62 @@ order by site_id
 limit 50 offset 100`
         }
     ];
+}
+
+/**
+ * Run a SQL query inside a worker thread with a wall-clock timeout.
+ *
+ * Because better-sqlite3 is synchronous and blocks the Node.js event loop,
+ * long-running queries prevent the MCP server from processing heartbeats
+ * or responding to client timeouts. This function offloads the query to a
+ * Worker, then races it against a setTimeout. If the timeout fires first,
+ * the worker is terminated and an error is thrown.
+ *
+ * @param dbPath  Absolute path to the SQLite database file
+ * @param sql     A SELECT statement to execute
+ * @param limit   Max rows to return (default 100, max 500)
+ * @param timeoutMs  Wall-clock deadline in milliseconds (default 25000)
+ */
+export function executeSqlWithTimeout(
+    dbPath: string,
+    sql: string,
+    limit: number = 100,
+    timeoutMs: number = 25_000
+): Promise<SqlResult> {
+    return new Promise((resolve, reject) => {
+        // Prefer the pre-compiled CJS worker (runs on any Node.js without tsx/ESM).
+        // Fall back to .ts only when running directly under tsx without Jest subprocess.
+        const workerBase = path.join(__dirname, 'sql_worker');
+        const workerScript =
+            fs.existsSync(workerBase + '.cjs') ? workerBase + '.cjs'
+                : fs.existsSync(workerBase + '.ts') ? workerBase + '.ts'
+                    : workerBase + '.js';
+
+        const worker = new Worker(workerScript, {
+            workerData: { dbPath, sql, limit },
+            // No execArgv propagation needed — .cjs workers run without tsx
+        });
+
+        const timer = setTimeout(() => {
+            worker.terminate();
+            reject(new Error(
+                `SQL query timed out after ${timeoutMs / 1000}s. ` +
+                `Try a more specific query with WHERE clauses or a lower row limit.`
+            ));
+        }, timeoutMs);
+
+        worker.once('message', (msg: { ok: true; result: SqlResult } | { ok: false; error: string }) => {
+            clearTimeout(timer);
+            if (msg.ok) {
+                resolve(msg.result);
+            } else {
+                reject(new Error(msg.error));
+            }
+        });
+
+        worker.once('error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
 }

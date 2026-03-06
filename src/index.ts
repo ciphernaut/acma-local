@@ -22,7 +22,7 @@ import {
     getLicenceDetails,
     getSiteDetails,
 } from './logic.js';
-import { executeSql, listSampleQueries } from './sql.js';
+import { executeSqlWithTimeout, listSampleQueries } from './sql.js';
 
 const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
 const PORT = process.env.PORT || 3000;
@@ -281,17 +281,14 @@ nature_of_service, reports_text_block, satellite, meta
         if (name === 'execute_sql') {
             const sql = args?.sql as string;
             const limit = (args?.limit as number) ?? 100;
-            const db = openDb();
             try {
-                const result = executeSql(db, sql, limit);
+                const result = await executeSqlWithTimeout(dbPath, sql, limit, 25_000);
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (err: any) {
                 return {
                     content: [{ type: 'text', text: `SQL Error: ${err.message}` }],
                     isError: true,
                 };
-            } finally {
-                if (db.open) db.close();
             }
         }
 

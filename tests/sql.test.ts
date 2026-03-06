@@ -1,4 +1,4 @@
-import { executeSql, listSampleQueries } from '../src/sql.js';
+import { executeSql, listSampleQueries, executeSqlWithTimeout } from '../src/sql.js';
 import { initializeDatabase } from '../src/db.js';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
@@ -87,3 +87,44 @@ describe('listSampleQueries', () => {
         }
     });
 });
+
+describe('executeSqlWithTimeout', () => {
+    const scratchDir = path.join(__dirname, '../scratch_test_sql_timeout');
+    const dbPath = path.join(scratchDir, 'test_acma.db');
+
+    beforeAll(() => {
+        if (!fs.existsSync(scratchDir)) fs.mkdirSync(scratchDir);
+        initializeDatabase(dbPath);
+        // Seed one row for the fast-query test
+        const db = new Database(dbPath);
+        db.prepare("INSERT INTO site (SITE_ID, NAME) VALUES ('T1', 'Test Site')").run();
+        db.close();
+    });
+
+    afterAll(() => {
+        if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    });
+
+    test('resolves with correct result for a fast query', async () => {
+        const result = await executeSqlWithTimeout(dbPath, "SELECT SITE_ID, NAME FROM site", 100, 5000);
+        expect(result.columns).toEqual(['SITE_ID', 'NAME']);
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0]).toEqual(['T1', 'Test Site']);
+    }, 10000);
+
+    test('rejects with timeout error when query exceeds timeoutMs', async () => {
+        // A 1ms timeout is shorter than worker startup time, so it always fires
+        // first regardless of query complexity. This tests the timeout mechanism
+        // itself (not a specific slow query).
+        await expect(
+            executeSqlWithTimeout(dbPath, "SELECT SITE_ID FROM site", 100, 1)
+        ).rejects.toThrow(/timed out/i);
+    }, 5000);
+
+    test('rejects non-SELECT through the worker', async () => {
+        await expect(
+            executeSqlWithTimeout(dbPath, "DROP TABLE site", 100, 5000)
+        ).rejects.toThrow(/SELECT/i);
+    }, 10000);
+});
+
