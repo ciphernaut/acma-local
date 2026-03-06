@@ -132,10 +132,48 @@ export async function performFullSync(config: SyncConfig): Promise<void> {
     }
 }
 
+/** Minimum milliseconds between any contact with the origin. */
+const SYNC_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+/**
+ * Returns the ISO-8601 timestamp of the last successful sync stored in the
+ * meta table, or null if the DB doesn't exist / has never been synced.
+ */
+function getLastSyncTime(dbPath: string): Date | null {
+    if (!fs.existsSync(dbPath)) return null;
+    try {
+        const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+        try {
+            const row = db.prepare("SELECT value FROM meta WHERE key = 'last_sync'").get() as { value: string } | undefined;
+            return row ? new Date(row.value) : null;
+        } finally {
+            if (db.open) db.close();
+        }
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Orchestrates the sync process.
+ * Will not contact the origin if the last successful sync was within 12 hours.
  */
 export async function sync(config: SyncConfig = DEFAULT_CONFIG): Promise<void> {
+    // ── Rate-limit guard ──────────────────────────────────────────────────────
+    const lastSync = getLastSyncTime(config.dbPath);
+    if (lastSync) {
+        const msSinceLast = Date.now() - lastSync.getTime();
+        if (msSinceLast < SYNC_COOLDOWN_MS) {
+            const nextSyncIn = Math.ceil((SYNC_COOLDOWN_MS - msSinceLast) / 60_000);
+            console.log(
+                `[SYNC] Skipping — last sync was ${Math.floor(msSinceLast / 60_000)} min ago. ` +
+                `Next allowed sync in ~${nextSyncIn} min.`
+            );
+            return;
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const dbExists = fs.existsSync(config.dbPath);
 
     if (!dbExists) {
@@ -277,14 +315,18 @@ export async function applyIncrementalUpdate(sqlContent: string, dbPath: string)
     }
 
     const db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
     db.transaction(() => {
         for (const sql of sqlStatements) {
             try {
                 db.exec(sql);
-            } catch (e) {
-                console.error(`Error executing incremental SQL: ${sql}`, e);
-                // We might want to continue or rollback depending on requirements.
-                // The web app continues but logs failures.
+            } catch (e: any) {
+                // Tables not in our schema (e.g. applic_text_block, antenna_pattern) are
+                // skipped silently — the incremental feed references the full ACMA schema
+                // but we only persist a subset. Any other error is logged.
+                if (!e?.message?.includes('no such table')) {
+                    console.error(`Error executing incremental SQL: ${sql}`, e);
+                }
             }
         }
     })();

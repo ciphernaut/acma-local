@@ -28,7 +28,6 @@ function runQuery(dbPath, sql, limit) {
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
     const db = new Database(dbPath, { readonly: true });
-    db.pragma('journal_mode = WAL');
     try {
         const stmt = db.prepare(wrapped);
         const rawRows = stmt.all();

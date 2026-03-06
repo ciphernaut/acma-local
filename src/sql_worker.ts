@@ -33,7 +33,7 @@ function runQuery(dbPath: string, sql: string, limit: number) {
     const cap = Math.min(Math.max(1, limit), 500);
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
-    const db = new Database(dbPath, { readonly: true });
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
         const stmt = db.prepare(wrapped);
         const rawRows = stmt.all() as Record<string, unknown>[];
