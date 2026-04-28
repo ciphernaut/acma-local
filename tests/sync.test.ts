@@ -129,6 +129,23 @@ describe('parseRemoteTimestamp', () => {
     test('returns null on empty string', () => {
         expect(parseRemoteTimestamp('')).toBeNull();
     });
+
+    test('parses compact YYYYMMDDHHMMSS form (no sub-seconds)', () => {
+        const d = parseRemoteTimestamp('20260305060000');
+        expect(d).not.toBeNull();
+        expect(d!.toISOString()).toBe('2026-03-05T06:00:00.000Z');
+    });
+
+    test('parses compact form with trailing nanosecond digits (real production shape)', () => {
+        // Mirror of the value observed in data/acma.db meta.as_of after a real sync.
+        const d = parseRemoteTimestamp('20260305234922793617000');
+        expect(d).not.toBeNull();
+        expect(d!.toISOString()).toBe('2026-03-05T23:49:22.000Z');
+    });
+
+    test('returns null on compact form with semantically invalid components', () => {
+        expect(parseRemoteTimestamp('20261301000000')).toBeNull();
+    });
 });
 
 describe('isInputZipStale', () => {

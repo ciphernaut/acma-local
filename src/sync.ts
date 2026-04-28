@@ -395,9 +395,16 @@ export async function applyIncrementalUpdate(sqlContent: string, dbPath: string)
  * Returns null on any parse failure — callers fall back to existing behaviour.
  */
 export function parseRemoteTimestamp(s: string): Date | null {
-    const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(s.trim());
-    if (!match) return null;
-    const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+    const trimmed = s.trim();
+    // ACMA's datetime-of-extract.txt and applyIncrementalUpdate's `-- TO:`
+    // line have both been observed in two shapes: dashed `YYYY-MM-DD HH:MM:SS`
+    // and a compact `YYYYMMDDHHMMSS` optionally followed by sub-second digits
+    // (the production feed currently emits 9 trailing digits — nanoseconds).
+    const dashed = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
+    const compact = dashed ? null : /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\d*$/.exec(trimmed);
+    const m = dashed ?? compact;
+    if (!m) return null;
+    const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
     const d = new Date(iso);
     return isNaN(d.getTime()) ? null : d;
 }
