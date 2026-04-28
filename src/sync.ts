@@ -23,11 +23,39 @@ export const DEFAULT_CONFIG: SyncConfig = {
     dbPath: './data/acma.db',
 };
 
+export type SyncMode = 'full' | 'incremental';
+
+/**
+ * The reason for the most recent sync decision. Set every time `sync()` makes
+ * a routing choice, so callers can tell why a run was skipped or which mode it
+ * picked. Outcome reasons (`incremental-failed`, `incremental-success`,
+ * `full-success`, `full-failed`) are set at the end of an attempt.
+ */
+export type SyncReason =
+    | 'cooldown-skipped'
+    | 'fetch-failed'
+    | 'parse-failed'
+    | 'no-db'
+    | 'gap-exceeded'
+    | 'within-window'
+    | 'incremental-success'
+    | 'incremental-failed'
+    | 'full-success'
+    | 'full-failed';
+
 export interface SyncStatus {
     isSyncing: boolean;
     progress: number; // 0-100
     currentTable?: string;
     lastError?: string;
+    /** Mode of the most recent attempt. Absent if no sync has been attempted. */
+    mode?: SyncMode;
+    /** Reason / outcome of the most recent decision. */
+    reason?: SyncReason;
+    /** ISO-8601 timestamp of the most recent decision. */
+    lastDecisionAt?: string;
+    /** Free-form context for the decision (e.g. "DB 53h behind", "next sync in 47 min"). */
+    detail?: string;
 }
 
 let currentSyncStatus: SyncStatus = {
@@ -37,6 +65,20 @@ let currentSyncStatus: SyncStatus = {
 
 export function getSyncStatus(): SyncStatus {
     return { ...currentSyncStatus };
+}
+
+/**
+ * Records the latest sync decision. Mode is omitted when no sync was attempted
+ * (cooldown / fetch-failed). `lastDecisionAt` is set to now.
+ */
+function recordDecision(reason: SyncReason, mode: SyncMode | undefined, detail?: string): void {
+    currentSyncStatus = {
+        ...currentSyncStatus,
+        reason,
+        lastDecisionAt: new Date().toISOString(),
+        ...(mode !== undefined ? { mode } : {}),
+        ...(detail !== undefined ? { detail } : {}),
+    };
 }
 
 /**
@@ -60,7 +102,10 @@ export async function performFullSync(config: SyncConfig, remoteTimestampRaw?: s
         throw new Error('Synchronization already in progress');
     }
 
-    currentSyncStatus = { isSyncing: true, progress: 0 };
+    // Reset transient run state but preserve decision metadata set by sync().
+    const { currentTable: _ct, lastError: _le, ...preserved } = currentSyncStatus;
+    void _ct; void _le;
+    currentSyncStatus = { ...preserved, isSyncing: true, progress: 0 };
 
     try {
         if (!fs.existsSync(config.dataDir)) {
@@ -182,6 +227,7 @@ export async function sync(config: SyncConfig = DEFAULT_CONFIG): Promise<void> {
                 `[SYNC] Skipping — last sync was ${Math.floor(msSinceLast / 60_000)} min ago. ` +
                 `Next allowed sync in ~${nextSyncIn} min.`
             );
+            recordDecision('cooldown-skipped', undefined, `next sync allowed in ~${nextSyncIn} min`);
             return;
         }
     }
@@ -194,7 +240,9 @@ export async function sync(config: SyncConfig = DEFAULT_CONFIG): Promise<void> {
         const tsResponse = await axios.get(config.timestampUrl, { responseType: 'text' });
         remoteTimestampRaw = String(tsResponse.data).trim();
     } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.error('[SYNC] Could not fetch remote timestamp; aborting sync.', e);
+        recordDecision('fetch-failed', undefined, msg);
         return;
     }
     const parsedRemote = parseRemoteTimestamp(remoteTimestampRaw);
@@ -205,7 +253,15 @@ export async function sync(config: SyncConfig = DEFAULT_CONFIG): Promise<void> {
     const dbExists = fs.existsSync(config.dbPath);
 
     if (!dbExists) {
-        await performFullSync(config, remoteTimestampRaw);
+        recordDecision('no-db', 'full', 'no local database; performing initial full sync');
+        try {
+            await performFullSync(config, remoteTimestampRaw);
+            recordDecision('full-success', 'full');
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            recordDecision('full-failed', 'full', msg);
+            throw e;
+        }
         return;
     }
 
@@ -228,13 +284,23 @@ export async function sync(config: SyncConfig = DEFAULT_CONFIG): Promise<void> {
                 : null;
             const gapDesc = gapHours === null ? 'no prior sync' : `${gapHours}h behind`;
             console.log(`[SYNC] DB is ${gapDesc} (remote=${parsedRemote.toISOString()}); full sync required.`);
-            await performFullSync(config, remoteTimestampRaw);
+            recordDecision('gap-exceeded', 'full', `DB ${gapDesc} of remote ${parsedRemote.toISOString()}`);
+            try {
+                await performFullSync(config, remoteTimestampRaw);
+                recordDecision('full-success', 'full');
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                recordDecision('full-failed', 'full', msg);
+                throw e;
+            }
             return;
         }
     }
 
     // Within the incremental window — attempt incremental sync
     console.log('Checking for incremental updates...');
+    recordDecision(parsedRemote ? 'within-window' : 'parse-failed', 'incremental',
+        parsedRemote ? undefined : `unparseable remote timestamp '${remoteTimestampRaw}' — gap check skipped`);
     try {
         const response = await axios.get(config.incrementalUrl);
         const updateContent = response.data;
@@ -246,9 +312,12 @@ export async function sync(config: SyncConfig = DEFAULT_CONFIG): Promise<void> {
             db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
             db.close();
             console.log(`Incremental sync successful. Database is now as-of ${newTimestamp}`);
+            recordDecision('incremental-success', 'incremental', `as-of ${newTimestamp}`);
         }
     } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.error('Incremental sync failed.', e);
+        recordDecision('incremental-failed', 'incremental', msg);
         // No auto-fallback: the gap check above already routed any DB that
         // is genuinely past the incremental window. Remaining failures are
         // transient and will retry on the next scheduled sync.

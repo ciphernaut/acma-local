@@ -365,16 +365,24 @@ Generate a KML file from cached query results.
 
         if (name === 'sync_data') {
             const status = getSyncStatus();
+            const decisionLine = status.reason
+                ? `Last decision: ${status.mode ? `${status.mode} sync — ` : ''}${status.reason}` +
+                  (status.detail ? ` (${status.detail})` : '') +
+                  (status.lastDecisionAt ? ` at ${status.lastDecisionAt}` : '')
+                : null;
+
             if (status.isSyncing) {
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Sync in progress: ${status.progress}% — step: ${status.currentTable ?? 'Initializing'}. Poll again soon.`
-                    }]
-                };
+                const lines = [
+                    `Sync in progress${status.mode ? ` (${status.mode})` : ''}: ${status.progress}% — step: ${status.currentTable ?? 'Initializing'}.`,
+                    'Poll sync_data again soon.',
+                ];
+                if (decisionLine) lines.push(decisionLine);
+                return { content: [{ type: 'text', text: lines.join('\n') }] };
             }
             sync(DEFAULT_CONFIG).catch(err => console.error('[SYNC] Error:', err));
-            return { content: [{ type: 'text', text: 'Sync started. Call sync_data again to check progress.' }] };
+            const lines = ['Sync started. Call sync_data again to check progress.'];
+            if (decisionLine) lines.push(`Previous run — ${decisionLine}`);
+            return { content: [{ type: 'text', text: lines.join('\n') }] };
         }
 
         if (name === 'list_sample_queries') {
