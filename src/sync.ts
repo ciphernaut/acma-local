@@ -334,3 +334,16 @@ export async function applyIncrementalUpdate(sqlContent: string, dbPath: string)
 
     return newAsof;
 }
+
+/**
+ * Parses ACMA's `datetime-of-extract.txt` payload (`YYYY-MM-DD HH:MM:SS`).
+ * Treated as UTC so comparisons against other parsed timestamps stay consistent.
+ * Returns null on any parse failure — callers fall back to existing behaviour.
+ */
+export function parseRemoteTimestamp(s: string): Date | null {
+    const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(s.trim());
+    if (!match) return null;
+    const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? null : d;
+}

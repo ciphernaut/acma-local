@@ -1,4 +1,4 @@
-import { extractZip, importCsv, applyIncrementalUpdate } from '../src/sync';
+import { extractZip, importCsv, applyIncrementalUpdate, parseRemoteTimestamp } from '../src/sync';
 import { initializeDatabase } from '../src/db';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
@@ -100,5 +100,29 @@ describe('Sync Logic - CSV Import', () => {
         expect(client).toBeDefined();
         expect(client.LICENCEE).toBe('Test Corp');
         db.close();
+    });
+});
+
+describe('parseRemoteTimestamp', () => {
+    test('parses well-formed ACMA timestamp as UTC', () => {
+        const d = parseRemoteTimestamp('2026-03-05 06:00:00');
+        expect(d).not.toBeNull();
+        expect(d!.toISOString()).toBe('2026-03-05T06:00:00.000Z');
+    });
+
+    test('tolerates surrounding whitespace and trailing newline', () => {
+        const d = parseRemoteTimestamp('  2026-03-05 06:00:00\n');
+        expect(d).not.toBeNull();
+        expect(d!.toISOString()).toBe('2026-03-05T06:00:00.000Z');
+    });
+
+    test('returns null on malformed input', () => {
+        expect(parseRemoteTimestamp('not a date')).toBeNull();
+        expect(parseRemoteTimestamp('2026/03/05 06:00:00')).toBeNull();
+        expect(parseRemoteTimestamp('2026-03-05T06:00:00Z')).toBeNull();
+    });
+
+    test('returns null on empty string', () => {
+        expect(parseRemoteTimestamp('')).toBeNull();
     });
 });
