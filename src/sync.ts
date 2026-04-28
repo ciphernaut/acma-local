@@ -83,15 +83,15 @@ export async function performFullSync(config: SyncConfig, remoteTimestampRaw?: s
 
         const parsedRemote = parseRemoteTimestamp(remoteTimestamp);
         const inputZipExists = fs.existsSync(zipPathFromInput);
-        const inputZipUsable = inputZipExists && !(parsedRemote && isInputZipStale(zipPathFromInput, parsedRemote));
+        const inputZipMtime = inputZipExists ? fs.statSync(zipPathFromInput).mtime : null;
+        const inputZipStale = inputZipMtime !== null && parsedRemote !== null && inputZipMtime < parsedRemote;
 
-        if (inputZipUsable) {
+        if (inputZipExists && !inputZipStale) {
             console.log('Using local dataset from inputs/');
             fs.copyFileSync(zipPathFromInput, zipPath);
         } else {
-            if (inputZipExists && parsedRemote) {
-                const mtime = fs.statSync(zipPathFromInput).mtime.toISOString();
-                console.log(`[SYNC] Input zip mtime=${mtime} is older than remote=${parsedRemote.toISOString()}; ignoring stale input.`);
+            if (inputZipStale && inputZipMtime && parsedRemote) {
+                console.log(`[SYNC] Input zip mtime=${inputZipMtime.toISOString()} is older than remote=${parsedRemote.toISOString()}; ignoring stale input.`);
             }
             console.log('Downloading full dataset...');
             await downloadFile(config.datasetUrl, zipPath);
