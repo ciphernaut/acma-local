@@ -23,6 +23,48 @@ export const DEFAULT_CONFIG: SyncConfig = {
     dbPath: './data/acma.db',
 };
 
+// ── ACMA /v1/Extracts manifest types ─────────────────────────────────────────
+//
+// Mirrors the JSON returned by GET https://backend.acma.gov.au/rrl/v1/Extracts.
+// `LastMdified` is misspelled on ACMA's side; preserved verbatim so JSON.parse
+// hits it directly. Each entry's Items array may contain spectra_rrl.zip and
+// (for full entries) spectra_licence_hrp.zip — we ignore the latter this sprint.
+
+export interface ExtractItem {
+    Description: string;
+    Format: string;
+    FileSize: number;
+    FileName: string;
+    FileUrl: string;
+}
+
+export interface ExtractEntry {
+    IsFullExtract: boolean;
+    LastMdified: string;       // ISO 8601, e.g. "2026-05-12T21:51:36Z"
+    DateOfChanges?: string;    // YYYY-MM-DD; present only when IsFullExtract === false
+    Items: ExtractItem[];
+}
+
+export type ExtractsManifest = ExtractEntry[];
+
+/**
+ * Returns the spectra_rrl* item from an entry's Items array, or null if none.
+ * Filters out spectra_licence_hrp.zip (Device Power Patterns — out of scope).
+ */
+export function pickSpectraRrl(items: ExtractItem[]): ExtractItem | null {
+    return items.find(i => i.FileName.startsWith('spectra_rrl')) ?? null;
+}
+
+/**
+ * Fetches and returns the ACMA /v1/Extracts manifest. The manifest contains
+ * the latest full extract entry plus the most recent (~3) daily change-zip
+ * entries. Throws on network / parse failure.
+ */
+export async function fetchExtractsManifest(url: string): Promise<ExtractsManifest> {
+    const response = await axios.get(url);
+    return response.data as ExtractsManifest;
+}
+
 export type SyncMode = 'full' | 'incremental';
 
 /**

@@ -1,10 +1,14 @@
 import { extractZip, importCsv, applyIncrementalUpdate, parseRemoteTimestamp, isInputZipStale, shouldDoFullSync } from '../src/sync';
+import { pickSpectraRrl, fetchExtractsManifest } from '../src/sync';
+import type { ExtractItem, ExtractsManifest } from '../src/sync';
 import { initializeDatabase } from '../src/db';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
+import { jest } from '@jest/globals';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -212,5 +216,82 @@ describe('shouldDoFullSync', () => {
     test('returns false when asOf is in the future relative to remote', () => {
         const asOf = new Date('2026-04-28T01:00:00Z');
         expect(shouldDoFullSync(asOf, remote)).toBe(false);
+    });
+});
+
+describe('pickSpectraRrl', () => {
+    const item = (FileName: string): ExtractItem => ({
+        Description: 'x', Format: 'CSV', FileSize: 0,
+        FileName, FileUrl: `https://cdn.example/${FileName}`,
+    });
+
+    test('returns the spectra_rrl entry when present alongside hrp', () => {
+        const items = [
+            item('spectra_rrl.zip'),
+            item('spectra_licence_hrp.zip'),
+        ];
+        expect(pickSpectraRrl(items)?.FileName).toBe('spectra_rrl.zip');
+    });
+
+    test('returns spectra_rrl-changes-YYYY-MM-DD.zip from an incremental entry', () => {
+        const items = [item('spectra_rrl-changes-2026-03-15.zip')];
+        expect(pickSpectraRrl(items)?.FileName).toBe('spectra_rrl-changes-2026-03-15.zip');
+    });
+
+    test('returns null when only hrp is present', () => {
+        const items = [item('spectra_licence_hrp.zip')];
+        expect(pickSpectraRrl(items)).toBeNull();
+    });
+
+    test('returns null on empty list', () => {
+        expect(pickSpectraRrl([])).toBeNull();
+    });
+});
+
+describe('fetchExtractsManifest', () => {
+    let axiosGetSpy: ReturnType<typeof jest.spyOn>;
+
+    beforeEach(() => {
+        axiosGetSpy = jest.spyOn(axios, 'get');
+    });
+
+    afterEach(() => { jest.restoreAllMocks(); });
+
+    test('parses the manifest payload, preserving LastMdified typo', async () => {
+        const payload: ExtractsManifest = [
+            {
+                IsFullExtract: true,
+                LastMdified: '2026-05-12T21:51:36Z',
+                Items: [{
+                    Description: 'Spectra dataset', Format: 'CSV', FileSize: 71666767,
+                    FileName: 'spectra_rrl.zip',
+                    FileUrl: 'https://cdn.acma.gov.au/rrl/spectra_rrl.zip',
+                }],
+            },
+            {
+                IsFullExtract: false,
+                DateOfChanges: '2026-03-15',
+                LastMdified: '2026-03-15T13:20:59Z',
+                Items: [{
+                    Description: 'Spectra dataset', Format: 'CSV', FileSize: 12600026,
+                    FileName: 'spectra_rrl-changes-2026-03-15.zip',
+                    FileUrl: 'https://cdn.acma.gov.au/rrl/changes/spectra_rrl-changes-2026-03-15.zip',
+                }],
+            },
+        ];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        axiosGetSpy.mockResolvedValueOnce({ data: payload } as any);
+
+        const m = await fetchExtractsManifest('https://example/v1/Extracts');
+
+        expect(m).toEqual(payload);
+        expect(m[0]!.LastMdified).toBe('2026-05-12T21:51:36Z');
+        expect(axiosGetSpy).toHaveBeenCalledWith('https://example/v1/Extracts');
+    });
+
+    test('propagates axios errors', async () => {
+        axiosGetSpy.mockRejectedValueOnce(new Error('network down') as never);
+        await expect(fetchExtractsManifest('https://example/v1/Extracts'))
+            .rejects.toThrow('network down');
     });
 });
