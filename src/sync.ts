@@ -222,7 +222,7 @@ function applyCsvDiff(csvBuffer: Buffer, tableName: string, db: Database.Databas
                 const values = dataCols.map(c => row[c] === '' ? null : row[c]);
                 insertStmt.run(...values);
             } else {
-                console.warn(`Unknown CHANGE='${change}' in ${tableName}; skipping row pk=${pkValue}`);
+                console.error(`Unknown CHANGE='${change}' in ${tableName}; skipping row pk=${pkValue}`);
             }
         }
     });
@@ -340,27 +340,27 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         const inputZipStale = inputZipExists && isInputZipStale(zipPathFromInput, remoteTimestamp);
 
         if (inputZipExists && !inputZipStale) {
-            console.log('Using local dataset from inputs/');
+            console.error('Using local dataset from inputs/');
             fs.copyFileSync(zipPathFromInput, zipPath);
         } else {
             if (inputZipStale) {
                 const mtime = fs.statSync(zipPathFromInput).mtime.toISOString();
-                console.log(`[SYNC] Input zip mtime=${mtime} is older than remote=${remoteTimestamp.toISOString()}; ignoring stale input.`);
+                console.error(`[SYNC] Input zip mtime=${mtime} is older than remote=${remoteTimestamp.toISOString()}; ignoring stale input.`);
             }
-            console.log(`Downloading full dataset from ${spectra.FileUrl}...`);
+            console.error(`Downloading full dataset from ${spectra.FileUrl}...`);
             await downloadFile(spectra.FileUrl, zipPath);
         }
 
         currentSyncStatus.progress = 20;
 
-        console.log('Extracting ZIP...');
+        console.error('Extracting ZIP...');
         const extractDir = path.join(config.dataDir, 'extracted');
         if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
         const files = await extractZip(zipPath, extractDir);
 
         currentSyncStatus.progress = 30;
 
-        console.log('Initializing database...');
+        console.error('Initializing database...');
         initializeDatabase(config.dbPath);
 
         const tablesToImport = files.filter(file => {
@@ -377,21 +377,26 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
             currentSyncStatus.currentTable = targetTable;
             const tableProgressBase = 30 + (i / tablesToImport.length) * 65;
 
-            console.log(`Importing ${fileName}...`);
+            console.error(`Importing ${fileName}...`);
+            // Import-loop maps to the 30..95 range (65 points total), divided evenly
+            // across `tablesToImport.length` files. Within each file's slice, `p`
+            // (0..100 from importCsv) advances progress by `sliceSize` points.
+            const sliceSize = 65 / tablesToImport.length;
             await importCsv(file, config.dbPath, targetTable, (p) => {
-                currentSyncStatus.progress = Math.round(
-                    tableProgressBase + (p / tablesToImport.length) * (65 / 100)
-                );
+                currentSyncStatus.progress = Math.round(tableProgressBase + (p / 100) * sliceSize);
             });
         }
 
         const db = new Database(config.dbPath);
-        db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', fullEntry.LastMdified);
-        db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
-        db.close();
+        try {
+            db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', fullEntry.LastMdified);
+            db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
+        } finally {
+            db.close();
+        }
 
         currentSyncStatus.progress = 100;
-        console.log('Full sync complete.');
+        console.error('Full sync complete.');
     } catch (error: any) {
         currentSyncStatus.lastError = error.message;
         throw error;
