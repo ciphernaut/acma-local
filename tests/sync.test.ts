@@ -464,11 +464,11 @@ describe('applyCsvDiffZip', () => {
     });
 
     test('CSVs for tables not in our schema are skipped silently', async () => {
-        // applic_text_block is in the change zip but not in our schema.
+        // access_area is in the ACMA change zip but not in our materialised schema.
         buildChangeZip({
-            'applic_text_block.csv':
-                'APTB_ID,APTB_TABLE_PREFIX,APTB_TABLE_ID,LICENCE_NO,APTB_DESCRIPTION,APTB_CATEGORY,APTB_TEXT,APTB_ITEM,CHANGE\n' +
-                '12345,,,,,,,,Deleted\n',
+            'access_area.csv':
+                'AREA_ID,AREA_NAME,CHANGE\n' +
+                '99999,Some Area,Deleted\n',
         });
         // Should not throw.
         await expect(applyCsvDiffZip(zipPath, dbPath)).resolves.toBeUndefined();

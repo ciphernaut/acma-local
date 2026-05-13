@@ -95,13 +95,56 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         ANTENNA_ID TEXT, GAIN TEXT, FRONT_TO_BACK TEXT,
         H_BEAMWIDTH TEXT, V_BEAMWIDTH TEXT, BAND_MIN_FREQ REAL,
         BAND_MIN_FREQ_UNIT TEXT, BAND_MAX_FREQ REAL,
-        BAND_MAX_FREQ_UNIT TEXT, ANTENNA_SIZE REAL, 
+        BAND_MAX_FREQ_UNIT TEXT, ANTENNA_SIZE REAL,
         ANTENNA_TYPE TEXT, MODEL TEXT, MANUFACTURER TEXT
       );
     `,
     "post_load_ddl": `
       CREATE INDEX IF NOT EXISTS antenna_antenna_id ON antenna(ANTENNA_ID);
     `
+  },
+  "client_type": {
+    "ddl": `CREATE TABLE IF NOT EXISTS client_type(TYPE_ID INTEGER, NAME TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS client_type_type_id ON client_type(TYPE_ID);`
+  },
+  "fee_status": {
+    "ddl": `CREATE TABLE IF NOT EXISTS fee_status(FEE_STATUS_ID INTEGER, FEE_STATUS_TEXT TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS fee_status_id_idx ON fee_status(FEE_STATUS_ID);`
+  },
+  "industry_cat": {
+    "ddl": `CREATE TABLE IF NOT EXISTS industry_cat(CAT_ID INTEGER, DESCRIPTION TEXT, NAME TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS industry_cat_cat_id ON industry_cat(CAT_ID);`
+  },
+  "licence_service": {
+    "ddl": `CREATE TABLE IF NOT EXISTS licence_service(SV_ID INTEGER, SV_NAME TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS licence_service_sv_id ON licence_service(SV_ID);`
+  },
+  "licence_subservice": {
+    "ddl": `CREATE TABLE IF NOT EXISTS licence_subservice(SS_ID INTEGER, SV_SV_ID INTEGER, SS_NAME TEXT);`,
+    "post_load_ddl": `
+      CREATE INDEX IF NOT EXISTS licence_subservice_ss_idx ON licence_subservice(SS_ID, SV_SV_ID);
+      CREATE INDEX IF NOT EXISTS licence_subservice_sv_idx ON licence_subservice(SV_SV_ID);
+    `
+  },
+  "licence_status": {
+    "ddl": `CREATE TABLE IF NOT EXISTS licence_status(STATUS INTEGER, STATUS_TEXT TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS licence_status_status_idx ON licence_status(STATUS);`
+  },
+  "nature_of_service": {
+    "ddl": `CREATE TABLE IF NOT EXISTS nature_of_service(CODE TEXT, DESCRIPTION TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS nature_of_service_code_idx ON nature_of_service(CODE);`
+  },
+  "class_of_station": {
+    "ddl": `CREATE TABLE IF NOT EXISTS class_of_station(CODE TEXT, DESCRIPTION TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS class_of_station_code_idx ON class_of_station(CODE);`
+  },
+  "licensing_area": {
+    "ddl": `CREATE TABLE IF NOT EXISTS licensing_area(LICENSING_AREA_ID INTEGER, DESCRIPTION TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS licensing_area_id_idx ON licensing_area(LICENSING_AREA_ID);`
+  },
+  "antenna_polarity": {
+    "ddl": `CREATE TABLE IF NOT EXISTS antenna_polarity(POLARISATION_CODE TEXT, POLARISATION_TEXT TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS antenna_polarity_code_idx ON antenna_polarity(POLARISATION_CODE);`
   },
   "meta": {
     "ddl": `

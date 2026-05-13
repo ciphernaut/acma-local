@@ -143,13 +143,33 @@ export function decideSyncAction(
  * (string) or an ordered array of column names for composite PKs.
  */
 const PK_BY_TABLE: Record<string, string | string[]> = {
+    // pre-existing
     client: 'CLIENT_NO',
     licence: 'LICENCE_NO',
     site: 'SITE_ID',
     device_details: 'SDD_ID',
     antenna: 'ANTENNA_ID',
-    // Composite-PK seed for tests; real entries land in Task 2.
+    // T1 lookups
+    client_type: 'TYPE_ID',
+    fee_status: 'FEE_STATUS_ID',
+    industry_cat: 'CAT_ID',
+    licence_service: 'SV_ID',
     licence_subservice: ['SS_ID', 'SV_SV_ID'],
+    licence_status: 'STATUS',
+    nature_of_service: 'CODE',
+    class_of_station: 'CODE',
+    licensing_area: 'LICENSING_AREA_ID',
+    antenna_polarity: 'POLARISATION_CODE',
+    // T2 broadcasting + spectrum
+    bsl: 'BSL_NO',
+    bsl_area: 'AREA_CODE',
+    auth_spectrum_freq: ['LICENCE_NO', 'AREA_CODE', 'LW_FREQUENCY_START', 'UP_FREQUENCY_START'],
+    auth_spectrum_area: ['LICENCE_NO', 'AREA_CODE'],
+    // T3
+    satellite: 'SA_ID',
+    // T4
+    applic_text_block: 'APTB_ID',
+    reports_text_block: 'RTB_ITEM',
 };
 
 /**
