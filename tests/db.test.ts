@@ -111,3 +111,29 @@ describe('T2 tables', () => {
         expect(cols.find(c => c.name === 'SA_ID')).toBeDefined();
     });
 });
+
+describe('T4 tables', () => {
+    const scratchDir = path.join(__dirname, '../scratch_test_t4');
+    const dbPath = path.join(scratchDir, 'test_acma.db');
+
+    beforeEach(() => {
+        if (!fs.existsSync(scratchDir)) fs.mkdirSync(scratchDir);
+        if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+        initializeDatabase(dbPath);
+    });
+
+    afterAll(() => {
+        if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    });
+
+    test.each([
+        ['applic_text_block', 'APTB_ID'],
+        ['reports_text_block', 'RTB_ITEM'],
+    ])('T4 %s table exists with column %s', (table, col) => {
+        const db = new Database(dbPath, { readonly: true });
+        const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+        db.close();
+        expect(cols.length).toBeGreaterThan(0);
+        expect(cols.find(c => c.name === col)).toBeDefined();
+    });
+});

@@ -200,6 +200,32 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
     `,
     "post_load_ddl": `CREATE INDEX IF NOT EXISTS satellite_sa_id_idx ON satellite(SA_ID);`
   },
+  "applic_text_block": {
+    "ddl": `
+      CREATE TABLE IF NOT EXISTS applic_text_block(
+        APTB_ID INTEGER, APTB_TABLE_PREFIX TEXT, APTB_TABLE_ID INTEGER,
+        LICENCE_NO TEXT, APTB_DESCRIPTION TEXT, APTB_CATEGORY TEXT,
+        APTB_TEXT TEXT, APTB_ITEM TEXT
+      );
+    `,
+    "post_load_ddl": `
+      CREATE INDEX IF NOT EXISTS atb_id_idx ON applic_text_block(APTB_ID);
+      CREATE INDEX IF NOT EXISTS atb_licence_idx ON applic_text_block(LICENCE_NO);
+      CREATE INDEX IF NOT EXISTS atb_category_idx ON applic_text_block(APTB_CATEGORY);
+    `
+  },
+  "reports_text_block": {
+    "ddl": `
+      CREATE TABLE IF NOT EXISTS reports_text_block(
+        RTB_ITEM TEXT, RTB_CATEGORY TEXT, RTB_DESCRIPTION TEXT,
+        RTB_START_DATE TEXT, RTB_END_DATE TEXT, RTB_TEXT TEXT
+      );
+    `,
+    "post_load_ddl": `
+      CREATE INDEX IF NOT EXISTS rtb_item_idx ON reports_text_block(RTB_ITEM);
+      CREATE INDEX IF NOT EXISTS rtb_category_idx ON reports_text_block(RTB_CATEGORY);
+    `
+  },
   "meta": {
     "ddl": `
       CREATE TABLE IF NOT EXISTS meta(
