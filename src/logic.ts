@@ -88,7 +88,7 @@ export function searchClients(db: Database.Database, query: string, limit: numbe
   `).all(`%${query}%`, `%${query}%`, limit);
 }
 
-export function searchBsl(db: Database.Database, query: string, limit: number = 10) {
+export function searchBsl(db: Database.Database, query: string, limit: number = 20) {
   return db.prepare(`
     SELECT b.*, a.AREA_NAME
     FROM bsl b
