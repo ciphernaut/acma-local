@@ -540,6 +540,7 @@ export async function sync(
         }
 
         case 'incremental': {
+            currentSyncStatus.isSyncing = true;
             try {
                 if (!fs.existsSync(config.dataDir)) {
                     fs.mkdirSync(config.dataDir, { recursive: true });
@@ -582,6 +583,8 @@ export async function sync(
                 const msg = e instanceof Error ? e.message : String(e);
                 console.error('[SYNC] Incremental sync failed.', e);
                 recordDecision('incremental-failed', 'incremental', msg);
+            } finally {
+                currentSyncStatus.isSyncing = false;
             }
             return;
         }

@@ -1,44 +1,59 @@
 # ETL Specifics
 
-The ACMA RRL data flows from the public ACMA updates server into a local SQLite database through a multi-stage ETL process.
+The ACMA RRL data flows from the public ACMA manifest API into a local SQLite database through a manifest-driven ETL process.
 
 ## Data Sources
 
-- **Full Dataset**: `https://web.acma.gov.au/rrl-updates/spectra_rrl.zip` (~100MB compressed, ~500MB uncompressed).
-- **Dataset Timestamp**: `https://web.acma.gov.au/rrl-updates/datetime-of-extract.txt`.
-- **Incremental Update**: `https://web.acma.gov.au/rrl/spectra_incremental.rrl_update`.
+- **Manifest endpoint**: `https://backend.acma.gov.au/rrl/v1/Extracts` — returns a JSON array of extract entries. The array always includes one full-extract entry and approximately three most-recent daily change-zip entries.
+- **Full extract zip**: `spectra_rrl.zip` (~100 MB compressed, ~500 MB uncompressed). The download URL (`FileUrl`) is hosted on `https://cdn.acma.gov.au/rrl/...` and is read directly from the manifest entry.
+- **Change zips**: `spectra_rrl-changes-YYYY-MM-DD.zip` (CSV-diff format). URLs also on `cdn.acma.gov.au`.
 
 ## Pipeline Flow
 
-### 1. Full Synchronization (Initial)
+### 1. Full Synchronization
 
-1.  **Download**: The `spectra_rrl.zip` is downloaded to the local `data` directory.
-2.  **Extraction**: The ZIP archive is extracted. It contains approximately 40 CSV files.
-3.  **Schema Creation**: A SQLite database is initialized with the schema derived from the ACMA web app's `gTABLE_METADATA`.
-4.  **Batch Import**: Each relevant CSV file (e.g., `client.csv`, `licence.csv`, `site.csv`) is parsed and imported into the database using `better-sqlite3` transactions for high performance.
-5.  **Indexing**: Post-load DDL statements are executed to create indexes on foreign keys and commonly searched columns.
-6.  **Metadata**: The `meta` table is updated with the `as_of` date from `datetime-of-extract.txt`.
+Triggered on initial bootstrap (no local DB) or when `sync_data` is called with `mode='full'`.
 
-### 2. Incremental Synchronization (Daily)
+1. **Download**: `spectra_rrl.zip` is downloaded from `fullEntry.FileUrl` (or copied from `inputs/spectra_rrl.zip` if it is up to date).
+2. **Extraction**: The ZIP archive is extracted, yielding approximately 32 CSV files.
+3. **Schema Creation**: `initializeDatabase` initialises the SQLite schema derived from ACMA's table metadata.
+4. **Batch Import**: Each relevant CSV is parsed and batch-imported via `better-sqlite3` transactions for high throughput.
+5. **Metadata**: `meta.as_of` is set to `fullEntry.LastMdified`; `meta.last_sync` is set to the current UTC timestamp.
 
-ACMA provides a daily `.rrl_update` file containing SQL `INSERT`, `UPDATE`, and `DELETE` statements aimed at synchronizing a local mirror that is less than 24 hours old.
+### 2. Incremental Synchronization
 
-1.  **Fetch Update**: The `.rrl_update` file is downloaded.
-2.  **Validation**: The file header is checked for `STATUS: SUCCESS`.
-3.  **Execution**: The SQL statements are executed within a transaction.
-4.  **Metadata Update**: The `meta` table is updated with the new `as_of` timestamp extracted from the `-- TO:` comment in the update file.
+Default path (`mode='auto'`) when the local DB is 1–30 hours behind the remote.
 
-## Observability & Progress
+1. **Select entries**: `decideSyncAction` identifies which change-zips to apply (those with `LastMdified` newer than the local `meta.as_of`), sorted oldest-first.
+2. **Download & apply**: For each change-zip, the file is downloaded then processed by `applyCsvDiffZip`. Each CSV in the zip has a trailing `CHANGE` column (`Added`, `Updated`, or `Deleted`). Rows are applied as DELETE-then-INSERT (for `Added`/`Updated`) or DELETE-only (for `Deleted`) inside a per-CSV transaction.
+3. **Metadata**: `meta.as_of` is advanced to `entries.at(-1).LastMdified`; `meta.last_sync` is updated.
 
-The ETL pipeline is instrumented to report real-time progress, which is exposed via the `sync_data` tool.
+> **ACMA naming quirk**: the change-zip uses `device_detail.csv` (singular) while the full extract uses `device_details.csv` (plural). This is an upstream inconsistency handled transparently by a `csvToTable` alias in `applyCsvDiffZip`.
 
-### Progress Stages
-1.  **Download**: Percentage of the ZIP file retrieved from the ACMA server.
-2.  **Extraction**: Status of file decompression.
-3.  **Table Import**: For each CSV file, progress is calculated based on bytes processed relative to the file size on disk.
-4.  **Completion**: The `as_of` date is verified and stored in the `meta` table.
+## Decision Logic
 
-This reporting allows clients to provide feedback to users during the initial 2-5 minute bulk import, reducing perceived latency.
+`decideSyncAction` (pure function in `src/sync.ts`) routes each `sync()` invocation:
+
+| Condition | Outcome |
+|---|---|
+| Last sync < 12 h ago | `noop/cooldown` |
+| No local DB | `full/bootstrap` |
+| `mode='full'` (no cooldown) | `full/forced` |
+| `meta.as_of` ≥ remote full | `noop/current` |
+| Gap ≤ 30 h and change-zips available | `incremental` |
+| Gap > 30 h or no applicable change-zips | `gap-exceeded` |
+
+When `gap-exceeded` is returned, the sync does **not** automatically pull the full extract — the caller must explicitly invoke `sync_data` with `mode='full'`.
+
+## Observability
+
+Three timestamps serve as the points of reference:
+
+- `meta.as_of` — data freshness (ISO 8601 UTC); updated after each successful sync.
+- `meta.last_sync` — when the ETL pipeline last completed successfully.
+- `LastMdified` (manifest field) — ACMA's authoritative remote timestamp for each entry.
+
+The `sync_data` MCP tool surfaces all three as `dataAsOf`, `lastSyncAt`, `remoteAsOf`, and the derived `behindByHours`.
 
 ## Compactness
 

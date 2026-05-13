@@ -509,6 +509,26 @@ describe('applyCsvDiffZip', () => {
         db.close();
         expect(row).toEqual({ CLIENT_NO: 99, LICENCEE: 'Late Arrival' });
     });
+
+    test('throws when CSV is missing the CHANGE column', async () => {
+        buildChangeZip({
+            'client.csv':
+                'CLIENT_NO,LICENCEE\n' +
+                '1,No Change Column Here\n',
+        });
+        await expect(applyCsvDiffZip(zipPath, dbPath))
+            .rejects.toThrow(/Expected CHANGE column/);
+    });
+
+    test('throws on unexpected column name (SQL-injection guard)', async () => {
+        buildChangeZip({
+            'client.csv':
+                'CLIENT_NO,"BAD;COL",CHANGE\n' +
+                '1,whatever,Added\n',
+        });
+        await expect(applyCsvDiffZip(zipPath, dbPath))
+            .rejects.toThrow(/Unexpected column name/);
+    });
 });
 
 describe('sync() orchestrator (mocked axios)', () => {
@@ -628,5 +648,67 @@ describe('sync() orchestrator (mocked axios)', () => {
         expect('mode' in status).toBe(false);
         expect(status.detail).toMatch(/h behind/);
         expect(axiosGetSpy).toHaveBeenCalledTimes(1); // ONLY the manifest call
+    });
+
+    test('incremental — applies daily change-zip and updates meta.as_of', async () => {
+        // Seed the DB at an as_of one day before the latest change-zip.
+        initializeDatabase(dbPath);
+        const seed = new Database(dbPath);
+        seed.prepare("REPLACE INTO meta (key, value) VALUES ('as_of', '2026-05-12T13:20:59Z')").run();
+        seed.prepare("INSERT INTO client (CLIENT_NO, LICENCEE) VALUES (1, 'Old Name')").run();
+        seed.close();
+
+        // Manifest with full=May 13 and a single change-zip for May 13.
+        const manifest: ExtractsManifest = [
+            {
+                IsFullExtract: true,
+                LastMdified: '2026-05-13T13:20:59Z',
+                Items: [{
+                    Description: 'Spectra dataset', Format: 'CSV', FileSize: 0,
+                    FileName: 'spectra_rrl.zip',
+                    FileUrl: 'https://cdn.example/spectra_rrl.zip',
+                }],
+            },
+            {
+                IsFullExtract: false, DateOfChanges: '2026-05-13',
+                LastMdified: '2026-05-13T13:00:00Z',
+                Items: [{
+                    Description: 'Spectra dataset', Format: 'CSV', FileSize: 0,
+                    FileName: 'spectra_rrl-changes-2026-05-13.zip',
+                    FileUrl: 'https://cdn.example/changes/spectra_rrl-changes-2026-05-13.zip',
+                }],
+            },
+        ];
+
+        axiosGetSpy.mockResolvedValueOnce({ data: manifest } as any);
+
+        // Build a change-zip that updates client 1.
+        const changeZipPath = path.join(scratchDir, 'fake_change.zip');
+        const changeZip = new AdmZip();
+        changeZip.addFile(
+            'client.csv',
+            Buffer.from(
+                'CLIENT_NO,LICENCEE,TRADING_NAME,ACN,ABN,POSTAL_STREET,POSTAL_SUBURB,POSTAL_STATE,POSTAL_POSTCODE,CAT_ID,CLIENT_TYPE_ID,FEE_STATUS_ID,CHANGE\n' +
+                '1,Updated Name,,,,,,,,,,,Updated\n',
+                'utf-8',
+            ),
+        );
+        changeZip.writeZip(changeZipPath);
+        const changeBytes = fs.readFileSync(changeZipPath);
+        const { Readable } = await import('stream');
+        axiosGetSpy.mockResolvedValueOnce({ data: Readable.from(changeBytes) } as any);
+
+        await sync(cfg, 'auto');
+
+        const status = getSyncStatus();
+        expect(status.reason).toBe('incremental-success');
+        expect(status.mode).toBe('incremental');
+        // Verify meta.as_of advanced and the row was updated.
+        const db = new Database(dbPath, { readonly: true });
+        const asOfRow = db.prepare("SELECT value FROM meta WHERE key = 'as_of'").get() as any;
+        const clientRow = db.prepare('SELECT LICENCEE FROM client WHERE CLIENT_NO = 1').get() as any;
+        db.close();
+        expect(asOfRow.value).toBe('2026-05-13T13:00:00Z');
+        expect(clientRow.LICENCEE).toBe('Updated Name');
     });
 });
