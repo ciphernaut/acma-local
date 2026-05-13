@@ -2,6 +2,7 @@ import {
     searchSites,
     getSiteDetails,
     searchLicences,
+    searchLicencesWithSites,
     searchClients,
     getLicenceDetails,
 } from '../src/logic.js';
@@ -70,5 +71,67 @@ describe('Logic Layer', () => {
         expect((results!.licence as any).LICENCE_NO).toBe('L1');
         expect((results!.client as any).LICENCEE).toBe('Test Client');
         expect(results!.devices).toHaveLength(1);
+    });
+
+    test('searchLicences returns SERVICE_NAME, SUBSERVICE_NAME, STATUS_NAME via JOINs', () => {
+        // Seed the lookups (call sites adjust per existing test infrastructure).
+        const db = new Database(dbPath);
+        db.exec(`
+            INSERT INTO licence_service (SV_ID, SV_NAME) VALUES (3, 'Land Mobile');
+            INSERT INTO licence_subservice (SS_ID, SV_SV_ID, SS_NAME) VALUES (304, 3, 'Land Mobile System');
+            INSERT INTO licence_status (STATUS, STATUS_TEXT) VALUES ('10', 'Expired');
+            INSERT INTO licence (LICENCE_NO, CLIENT_NO, SV_ID, SS_ID, STATUS) VALUES ('LM1', 1, 3, 304, '10');
+        `);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        const results = searchLicences(db2, 'LM1', 10) as any[];
+        db2.close();
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({
+            LICENCE_NO: 'LM1',
+            SV_ID: 3,
+            SERVICE_NAME: 'Land Mobile',
+            SUBSERVICE_NAME: 'Land Mobile System',
+            STATUS_NAME: 'Expired',
+        });
+    });
+
+    test('searchClients returns CLIENT_TYPE_NAME, FEE_STATUS_NAME, INDUSTRY_NAME via JOINs', () => {
+        const db = new Database(dbPath);
+        db.exec(`
+            INSERT INTO client_type (TYPE_ID, NAME) VALUES (5, 'Company');
+            INSERT INTO fee_status (FEE_STATUS_ID, FEE_STATUS_TEXT) VALUES (1, 'Normal');
+            INSERT INTO industry_cat (CAT_ID, DESCRIPTION, NAME) VALUES (3, 'Manufacturing', 'Manufacturing');
+            INSERT INTO client (CLIENT_NO, LICENCEE, CAT_ID, CLIENT_TYPE_ID, FEE_STATUS_ID)
+                VALUES (42, 'Acme Pty Ltd', 3, 5, 1);
+        `);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        const results = searchClients(db2, 'Acme', 10) as any[];
+        db2.close();
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({
+            LICENCEE: 'Acme Pty Ltd',
+            CLIENT_TYPE_NAME: 'Company',
+            FEE_STATUS_NAME: 'Normal',
+            INDUSTRY_NAME: 'Manufacturing',
+        });
+    });
+
+    test('searchSites returns LICENSING_AREA_NAME via JOIN', () => {
+        const db = new Database(dbPath);
+        db.exec(`
+            INSERT INTO licensing_area (LICENSING_AREA_ID, DESCRIPTION) VALUES (1, 'Australia');
+            INSERT INTO site (SITE_ID, NAME, POSTCODE, LICENSING_AREA_ID)
+                VALUES ('S1_LA', 'Test Site', '2000', 1);
+        `);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        const results = searchSites(db2, 'Test Site', 10) as any[];
+        db2.close();
+        expect(results[0]?.LICENSING_AREA_NAME).toBe('Australia');
     });
 });
