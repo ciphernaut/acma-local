@@ -149,11 +149,13 @@ export function getLicenceDetails(db: Database.Database, licenceNo: string) {
            nos.DESCRIPTION       AS NATURE_OF_SERVICE_NAME,
            cos.DESCRIPTION       AS CLASS_OF_STATION_NAME,
            ap.POLARISATION_TEXT  AS POLARISATION_NAME,
+           sat.SA_SAT_NAME       AS SATELLITE_NAME,
            s.LATITUDE, s.LONGITUDE, s.NAME AS SITE_NAME
     FROM device_details d
     LEFT JOIN nature_of_service nos ON nos.CODE = d.NATURE_OF_SERVICE_ID
     LEFT JOIN class_of_station   cos ON cos.CODE = d.CLASS_OF_STATION_CODE
     LEFT JOIN antenna_polarity   ap  ON ap.POLARISATION_CODE = d.POLARISATION
+    LEFT JOIN satellite          sat ON sat.SA_ID = d.SA_ID
     LEFT JOIN site s ON d.SITE_ID = s.SITE_ID
     WHERE d.LICENCE_NO = ?
     LIMIT 50

@@ -197,6 +197,22 @@ describe('Logic Layer', () => {
         expect(straddle).toHaveLength(1);
     });
 
+    test('getLicenceDetails device rows include SATELLITE_NAME when SA_ID is set', () => {
+        const db = new Database(dbPath);
+        db.exec(`
+            INSERT INTO satellite (SA_ID, SA_SAT_NAME) VALUES (1003, 'USASAT-14K');
+            INSERT INTO licence (LICENCE_NO, CLIENT_NO) VALUES ('SAT1', 99);
+            INSERT INTO device_details (SDD_ID, LICENCE_NO, SA_ID) VALUES (5001, 'SAT1', 1003);
+        `);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        const details = getLicenceDetails(db2, 'SAT1') as any;
+        db2.close();
+        expect(details).not.toBeNull();
+        expect(details.devices[0]).toMatchObject({ SDD_ID: 5001, SA_ID: 1003, SATELLITE_NAME: 'USASAT-14K' });
+    });
+
     test('searchSpectrumBand handles rows with NULL UP_FREQUENCY_END', () => {
         const db = new Database(dbPath);
         db.exec(`

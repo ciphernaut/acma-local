@@ -191,6 +191,15 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
       CREATE INDEX IF NOT EXISTS asa_pk_idx ON auth_spectrum_area(LICENCE_NO, AREA_CODE);
     `
   },
+  "satellite": {
+    "ddl": `
+      CREATE TABLE IF NOT EXISTS satellite(
+        SA_ID INTEGER, SA_SAT_NAME TEXT, SA_SAT_LONG_NOM TEXT,
+        SA_SAT_INCEXC TEXT, SA_SAT_GEO_POS TEXT, SA_SAT_MERIT_G_T TEXT
+      );
+    `,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS satellite_sa_id_idx ON satellite(SA_ID);`
+  },
   "meta": {
     "ddl": `
       CREATE TABLE IF NOT EXISTS meta(

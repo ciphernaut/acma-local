@@ -102,4 +102,12 @@ describe('T2 tables', () => {
         expect(cols.length).toBeGreaterThan(0);
         expect(cols.find(c => c.name === col)).toBeDefined();
     });
+
+    test('satellite table exists with SA_ID column', () => {
+        const db = new Database(dbPath, { readonly: true });
+        const cols = db.prepare("PRAGMA table_info(satellite)").all() as any[];
+        db.close();
+        expect(cols.length).toBeGreaterThan(0);
+        expect(cols.find(c => c.name === 'SA_ID')).toBeDefined();
+    });
 });
