@@ -166,6 +166,31 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
     "ddl": `CREATE TABLE IF NOT EXISTS bsl_area(AREA_CODE INTEGER, AREA_NAME TEXT);`,
     "post_load_ddl": `CREATE INDEX IF NOT EXISTS bsl_area_code_idx2 ON bsl_area(AREA_CODE);`
   },
+  "auth_spectrum_freq": {
+    "ddl": `
+      CREATE TABLE IF NOT EXISTS auth_spectrum_freq(
+        LICENCE_NO TEXT, AREA_CODE TEXT, AREA_NAME TEXT,
+        LW_FREQUENCY_START INTEGER, LW_FREQUENCY_END INTEGER,
+        UP_FREQUENCY_START INTEGER, UP_FREQUENCY_END INTEGER
+      );
+    `,
+    "post_load_ddl": `
+      CREATE INDEX IF NOT EXISTS asf_licence_idx ON auth_spectrum_freq(LICENCE_NO);
+      CREATE INDEX IF NOT EXISTS asf_lw_idx ON auth_spectrum_freq(LW_FREQUENCY_START);
+      CREATE INDEX IF NOT EXISTS asf_pk_idx ON auth_spectrum_freq(LICENCE_NO, AREA_CODE, LW_FREQUENCY_START, UP_FREQUENCY_START);
+    `
+  },
+  "auth_spectrum_area": {
+    "ddl": `
+      CREATE TABLE IF NOT EXISTS auth_spectrum_area(
+        LICENCE_NO TEXT, AREA_CODE TEXT, AREA_NAME TEXT, AREA_DESCRIPTION TEXT
+      );
+    `,
+    "post_load_ddl": `
+      CREATE INDEX IF NOT EXISTS asa_licence_idx ON auth_spectrum_area(LICENCE_NO);
+      CREATE INDEX IF NOT EXISTS asa_pk_idx ON auth_spectrum_area(LICENCE_NO, AREA_CODE);
+    `
+  },
   "meta": {
     "ddl": `
       CREATE TABLE IF NOT EXISTS meta(

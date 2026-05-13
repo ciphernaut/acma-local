@@ -91,4 +91,14 @@ describe('T2 tables', () => {
         expect(cols.length).toBeGreaterThan(0);
         expect(cols.find(c => c.name === pkCol)).toBeDefined();
     });
+
+    test.each([
+        ['auth_spectrum_freq', 'LICENCE_NO'],
+        ['auth_spectrum_area', 'LICENCE_NO'],
+    ])('T2 %s table exists with column %s', (table, col) => {
+        const db = new Database(dbPath, { readonly: true });
+        const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+        db.close();
+        expect(cols.find(c => c.name === col)).toBeDefined();
+    });
 });

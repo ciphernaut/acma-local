@@ -23,6 +23,7 @@ import {
     getLicenceDetails,
     getSiteDetails,
     searchBsl,
+    searchSpectrumBand,
 } from './logic.js';
 import { executeSqlWithTimeout, listSampleQueries } from './sql.js';
 import { generateKml } from './kml.js';
@@ -207,6 +208,30 @@ Search broadcasting service licences (BSLs) by call sign, BSL number, or on-air 
                         limit: { type: 'number', description: 'Max rows (default 10)' },
                     },
                     required: ['query'],
+                },
+            },
+            {
+                name: 'search_spectrum_band',
+                description: `
+### [Spectrum Authorisation Search]
+Find licences authorised in a frequency range. Frequencies are in Hertz (Hz).
+
+## Usage
+- Use for queries like "who's licenced between 1800 and 1900 MHz?"
+- Pass freq_min_hz and freq_max_hz; result rows overlap the requested range
+- Results include LICENCE_NO, AREA_NAME, frequency endpoints, CLIENT_NO
+
+## Input
+- freq_min_hz: Lower bound of the band, in Hz (e.g. 1800000000 for 1.8 GHz)
+- freq_max_hz: Upper bound of the band, in Hz`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        freq_min_hz: { type: 'number', description: 'Lower bound (Hz)' },
+                        freq_max_hz: { type: 'number', description: 'Upper bound (Hz)' },
+                        limit:       { type: 'number', description: 'Max rows (default 20)' },
+                    },
+                    required: ['freq_min_hz', 'freq_max_hz'],
                 },
             },
             {
@@ -407,6 +432,19 @@ Generate a KML file from cached query results.
                 const results = searchBsl(db, args?.query as string, (args?.limit as number) ?? 10);
                 return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
             } finally { if (db.open) db.close(); }
+        }
+
+        if (name === 'search_spectrum_band') {
+            const db = openDb();
+            try {
+                const results = searchSpectrumBand(
+                    db,
+                    args?.freq_min_hz as number,
+                    args?.freq_max_hz as number,
+                    (args?.limit as number) ?? 20
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+            } finally { db.close(); }
         }
 
         if (name === 'sync_data') {

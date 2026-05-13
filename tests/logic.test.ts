@@ -5,6 +5,7 @@ import {
     searchClients,
     getLicenceDetails,
     searchBsl,
+    searchSpectrumBand,
 } from '../src/logic.js';
 import { initializeDatabase } from '../src/db.js';
 import Database from 'better-sqlite3';
@@ -167,5 +168,32 @@ describe('Logic Layer', () => {
         const results = searchBsl(db2, '123', 10) as any[];
         db2.close();
         expect(results[0]?.BSL_NO).toBe(123);
+    });
+
+    test('searchSpectrumBand finds licences whose band overlaps the query', () => {
+        const db = new Database(dbPath);
+        db.exec(`
+            INSERT INTO auth_spectrum_area
+                (LICENCE_NO, AREA_CODE, AREA_NAME, AREA_DESCRIPTION)
+                VALUES ('10143110', 'AP_10143110_3918', 'Brisbane', 'KX6G, KX6H...');
+            INSERT INTO auth_spectrum_freq
+                (LICENCE_NO, AREA_CODE, AREA_NAME, LW_FREQUENCY_START, LW_FREQUENCY_END, UP_FREQUENCY_START, UP_FREQUENCY_END)
+                VALUES ('10143110', 'AP_10143110_3918', 'Brisbane', 1960000000, 1970000000, 2150000000, 2160000000);
+        `);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        // Query 1.96-1.97 GHz — overlaps the LW range.
+        const overlap = searchSpectrumBand(db2, 1_960_000_000, 1_970_000_000, 50) as any[];
+        // Query 0-100 Hz — far outside; should return none.
+        const outside = searchSpectrumBand(db2, 0, 100, 50) as any[];
+        // Query 1.965 GHz to 2.155 GHz — straddles both bands.
+        const straddle = searchSpectrumBand(db2, 1_965_000_000, 2_155_000_000, 50) as any[];
+        db2.close();
+
+        expect(overlap).toHaveLength(1);
+        expect(overlap[0]).toMatchObject({ LICENCE_NO: '10143110', AREA_NAME: 'Brisbane' });
+        expect(outside).toHaveLength(0);
+        expect(straddle).toHaveLength(1);
     });
 });

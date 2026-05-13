@@ -530,6 +530,33 @@ describe('applyCsvDiffZip', () => {
             .rejects.toThrow(/Unexpected column name/);
     });
 
+    test('auth_spectrum_freq incremental (4-column composite PK)', async () => {
+        // Seed two rows with the same LICENCE_NO + AREA_CODE but different freq starts.
+        const seedDb = new Database(dbPath);
+        seedDb.exec(`
+            INSERT INTO auth_spectrum_freq
+                (LICENCE_NO, AREA_CODE, AREA_NAME, LW_FREQUENCY_START, LW_FREQUENCY_END, UP_FREQUENCY_START, UP_FREQUENCY_END)
+                VALUES ('L1', 'A1', 'X', 100, 200, 300, 400);
+            INSERT INTO auth_spectrum_freq
+                (LICENCE_NO, AREA_CODE, AREA_NAME, LW_FREQUENCY_START, LW_FREQUENCY_END, UP_FREQUENCY_START, UP_FREQUENCY_END)
+                VALUES ('L1', 'A1', 'X', 500, 600, 700, 800);
+        `);
+        seedDb.close();
+
+        // Delete only the (L1, A1, 100, 300) row.
+        buildChangeZip({
+            'auth_spectrum_freq.csv':
+                'LICENCE_NO,AREA_CODE,AREA_NAME,LW_FREQUENCY_START,LW_FREQUENCY_END,UP_FREQUENCY_START,UP_FREQUENCY_END,CHANGE\n' +
+                'L1,A1,,100,,300,,Deleted\n',
+        });
+        await applyCsvDiffZip(zipPath, dbPath);
+
+        const db = new Database(dbPath);
+        const rows = db.prepare('SELECT LW_FREQUENCY_START FROM auth_spectrum_freq ORDER BY LW_FREQUENCY_START').all() as any[];
+        db.close();
+        expect(rows).toEqual([{ LW_FREQUENCY_START: 500 }]);
+    });
+
     test('composite-PK table: DELETE binds all PK columns positionally', async () => {
         // Add a synthetic composite-PK entry to PK_BY_TABLE via a real table.
         // licence_subservice is the smallest real composite-PK table; its schema
