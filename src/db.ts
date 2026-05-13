@@ -146,6 +146,26 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
     "ddl": `CREATE TABLE IF NOT EXISTS antenna_polarity(POLARISATION_CODE TEXT, POLARISATION_TEXT TEXT);`,
     "post_load_ddl": `CREATE INDEX IF NOT EXISTS antenna_polarity_code_idx ON antenna_polarity(POLARISATION_CODE);`
   },
+  "bsl": {
+    "ddl": `
+      CREATE TABLE IF NOT EXISTS bsl(
+        BSL_NO INTEGER, MEDIUM_CATEGORY TEXT, REGION_CATEGORY TEXT,
+        COMMUNITY_INTEREST TEXT, BSL_STATE TEXT, DATE_COMMENCED TEXT,
+        ON_AIR_ID TEXT, CALL_SIGN TEXT, IBL_TARGET_AREA TEXT,
+        AREA_CODE INTEGER, REFERENCE TEXT
+      );
+    `,
+    "post_load_ddl": `
+      CREATE INDEX IF NOT EXISTS bsl_bsl_no_idx ON bsl(BSL_NO);
+      CREATE INDEX IF NOT EXISTS bsl_call_sign_idx ON bsl(CALL_SIGN);
+      CREATE INDEX IF NOT EXISTS bsl_on_air_id_idx ON bsl(ON_AIR_ID);
+      CREATE INDEX IF NOT EXISTS bsl_area_code_idx ON bsl(AREA_CODE);
+    `
+  },
+  "bsl_area": {
+    "ddl": `CREATE TABLE IF NOT EXISTS bsl_area(AREA_CODE INTEGER, AREA_NAME TEXT);`,
+    "post_load_ddl": `CREATE INDEX IF NOT EXISTS bsl_area_code_idx2 ON bsl_area(AREA_CODE);`
+  },
   "meta": {
     "ddl": `
       CREATE TABLE IF NOT EXISTS meta(

@@ -22,6 +22,7 @@ import {
     searchClients,
     getLicenceDetails,
     getSiteDetails,
+    searchBsl,
 } from './logic.js';
 import { executeSqlWithTimeout, listSampleQueries } from './sql.js';
 import { generateKml } from './kml.js';
@@ -183,6 +184,27 @@ Search for licence holders (clients) by company name or trading name.
                     properties: {
                         query: { type: 'string', description: 'Licensee or trading name' },
                         limit: { type: 'number', description: 'Max results (default 10)' },
+                    },
+                    required: ['query'],
+                },
+            },
+            {
+                name: 'search_bsl',
+                description: `
+### [Broadcasting Licence Search]
+Search broadcasting service licences (BSLs) by call sign, BSL number, or on-air ID.
+
+## Usage
+- Use for queries about broadcast/TV/radio operators (e.g. "what's the call sign for ABC Sydney?")
+- Results include: BSL_NO, CALL_SIGN, MEDIUM_CATEGORY, REGION_CATEGORY, BSL_STATE, DATE_COMMENCED, ON_AIR_ID, AREA_NAME
+
+## Input
+- query: CALL_SIGN, BSL_NO, or ON_AIR_ID (substring match)`,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        query: { type: 'string', description: 'CALL_SIGN, BSL_NO, or ON_AIR_ID' },
+                        limit: { type: 'number', description: 'Max rows (default 10)' },
                     },
                     required: ['query'],
                 },
@@ -375,6 +397,14 @@ Generate a KML file from cached query results.
             const db = openDb();
             try {
                 const results = searchClients(db, args?.query as string, (args?.limit as number) ?? 10);
+                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+            } finally { if (db.open) db.close(); }
+        }
+
+        if (name === 'search_bsl') {
+            const db = openDb();
+            try {
+                const results = searchBsl(db, args?.query as string, (args?.limit as number) ?? 10);
                 return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }

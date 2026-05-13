@@ -4,6 +4,7 @@ import {
     searchLicences,
     searchClients,
     getLicenceDetails,
+    searchBsl,
 } from '../src/logic.js';
 import { initializeDatabase } from '../src/db.js';
 import Database from 'better-sqlite3';
@@ -132,5 +133,39 @@ describe('Logic Layer', () => {
         const results = searchSites(db2, 'Test Site', 10) as any[];
         db2.close();
         expect(results[0]?.LICENSING_AREA_NAME).toBe('Australia');
+    });
+
+    test('searchBsl matches by call sign and joins bsl_area for AREA_NAME', () => {
+        const db = new Database(dbPath);
+        db.exec(`
+            INSERT INTO bsl_area (AREA_CODE, AREA_NAME) VALUES (162, 'ADELAIDE TV1');
+            INSERT INTO bsl
+                (BSL_NO, MEDIUM_CATEGORY, REGION_CATEGORY, BSL_STATE, DATE_COMMENCED, ON_AIR_ID, CALL_SIGN, AREA_CODE)
+                VALUES (85, 'TV', 'Regional', 'ACT', '1962-06-02', '10', 'CTC', 162);
+        `);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        const results = searchBsl(db2, 'CTC', 10) as any[];
+        db2.close();
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({
+            BSL_NO: 85,
+            CALL_SIGN: 'CTC',
+            MEDIUM_CATEGORY: 'TV',
+            BSL_STATE: 'ACT',
+            AREA_NAME: 'ADELAIDE TV1',
+        });
+    });
+
+    test('searchBsl matches by BSL_NO (numeric string)', () => {
+        const db = new Database(dbPath);
+        db.exec(`INSERT INTO bsl (BSL_NO, CALL_SIGN) VALUES (123, 'XYZ');`);
+        db.close();
+
+        const db2 = new Database(dbPath, { readonly: true });
+        const results = searchBsl(db2, '123', 10) as any[];
+        db2.close();
+        expect(results[0]?.BSL_NO).toBe(123);
     });
 });

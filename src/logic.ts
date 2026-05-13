@@ -88,6 +88,18 @@ export function searchClients(db: Database.Database, query: string, limit: numbe
   `).all(`%${query}%`, `%${query}%`, limit);
 }
 
+export function searchBsl(db: Database.Database, query: string, limit: number = 10) {
+  return db.prepare(`
+    SELECT b.*, a.AREA_NAME
+    FROM bsl b
+    LEFT JOIN bsl_area a ON a.AREA_CODE = b.AREA_CODE
+    WHERE b.CALL_SIGN LIKE ?
+       OR CAST(b.BSL_NO AS TEXT) LIKE ?
+       OR b.ON_AIR_ID LIKE ?
+    LIMIT ?
+  `).all(`%${query}%`, `%${query}%`, `%${query}%`, limit);
+}
+
 export function getLicenceDetails(db: Database.Database, licenceNo: string) {
   const licence = db.prepare(`
     ${LICENCE_SELECT}

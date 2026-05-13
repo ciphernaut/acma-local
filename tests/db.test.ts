@@ -66,3 +66,29 @@ describe('T1 lookup tables', () => {
         expect(cols.find(c => c.name === pkCol)).toBeDefined();
     });
 });
+
+describe('T2 tables', () => {
+    const scratchDir = path.join(__dirname, '../scratch_test_t2');
+    const dbPath = path.join(scratchDir, 'test_acma.db');
+
+    beforeEach(() => {
+        if (!fs.existsSync(scratchDir)) fs.mkdirSync(scratchDir);
+        if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+        initializeDatabase(dbPath);
+    });
+
+    afterAll(() => {
+        if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    });
+
+    test.each([
+        ['bsl', 'BSL_NO'],
+        ['bsl_area', 'AREA_CODE'],
+    ])('T2 %s table exists with expected PK column %s', (table, pkCol) => {
+        const db = new Database(dbPath, { readonly: true });
+        const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+        db.close();
+        expect(cols.length).toBeGreaterThan(0);
+        expect(cols.find(c => c.name === pkCol)).toBeDefined();
+    });
+});
