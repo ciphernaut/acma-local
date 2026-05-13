@@ -507,17 +507,32 @@ export async function applyIncrementalUpdate(sqlContent: string, dbPath: string)
  */
 export function parseRemoteTimestamp(s: string): Date | null {
     const trimmed = s.trim();
-    // ACMA's datetime-of-extract.txt and applyIncrementalUpdate's `-- TO:`
-    // line have both been observed in two shapes: dashed `YYYY-MM-DD HH:MM:SS`
-    // and a compact `YYYYMMDDHHMMSS` optionally followed by sub-second digits
-    // (the production feed currently emits 9 trailing digits — nanoseconds).
+    // Three accepted forms:
+    //   1. Dashed `YYYY-MM-DD HH:MM:SS` (legacy datetime-of-extract.txt).
+    //   2. Compact `YYYYMMDDHHMMSS` optionally followed by sub-second digits
+    //      (production feed at one point emitted 9 trailing digits).
+    //   3. ISO 8601 UTC `YYYY-MM-DDTHH:MM:SS[.fff]Z` (new manifest LastMdified).
     const dashed = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(trimmed);
     const compact = dashed ? null : /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\d*$/.exec(trimmed);
-    const m = dashed ?? compact;
+    const iso = (dashed || compact) ? null : /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/.exec(trimmed);
+    const m = dashed ?? compact ?? iso;
     if (!m) return null;
-    const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
-    const d = new Date(iso);
-    return isNaN(d.getTime()) ? null : d;
+    // Construct ISO-8601 in UTC and validate by round-trip.
+    // Compare against the input components so values like month=13 → null.
+    const iso8601 = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
+    const d = new Date(iso8601);
+    if (isNaN(d.getTime())) return null;
+    // Validate components round-trip (rejects 2026-13-12T... etc.)
+    if (d.getUTCFullYear() !== Number(m[1]) ||
+        d.getUTCMonth() + 1 !== Number(m[2]) ||
+        d.getUTCDate() !== Number(m[3])) {
+        return null;
+    }
+    // Preserve fractional seconds when present (ISO form only).
+    if (iso) {
+        return new Date(trimmed);
+    }
+    return d;
 }
 
 /**

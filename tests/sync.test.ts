@@ -123,7 +123,6 @@ describe('parseRemoteTimestamp', () => {
     test('returns null on malformed input', () => {
         expect(parseRemoteTimestamp('not a date')).toBeNull();
         expect(parseRemoteTimestamp('2026/03/05 06:00:00')).toBeNull();
-        expect(parseRemoteTimestamp('2026-03-05T06:00:00Z')).toBeNull();
     });
 
     test('returns null on regex-valid but semantically invalid date', () => {
@@ -149,6 +148,28 @@ describe('parseRemoteTimestamp', () => {
 
     test('returns null on compact form with semantically invalid components', () => {
         expect(parseRemoteTimestamp('20261301000000')).toBeNull();
+    });
+
+    test('parses ISO 8601 UTC form (no fractional seconds)', () => {
+        const d = parseRemoteTimestamp('2026-05-12T21:51:36Z');
+        expect(d).not.toBeNull();
+        expect(d!.toISOString()).toBe('2026-05-12T21:51:36.000Z');
+    });
+
+    test('parses ISO 8601 UTC form with fractional seconds', () => {
+        const d = parseRemoteTimestamp('2026-05-12T21:51:36.123Z');
+        expect(d).not.toBeNull();
+        expect(d!.toISOString()).toBe('2026-05-12T21:51:36.123Z');
+    });
+
+    test('returns null on ISO 8601 with non-UTC timezone', () => {
+        // We only support 'Z'; offsets like +10:00 are intentionally rejected
+        // because ACMA's manifest always emits 'Z'.
+        expect(parseRemoteTimestamp('2026-05-12T21:51:36+10:00')).toBeNull();
+    });
+
+    test('returns null on ISO 8601 with semantically invalid components', () => {
+        expect(parseRemoteTimestamp('2026-13-12T21:51:36Z')).toBeNull();
     });
 });
 
