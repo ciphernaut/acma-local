@@ -241,12 +241,12 @@ export type SyncReason =
     | 'cooldown'
     | 'current'
     | 'manifest-fetch-failed'
+    | 'manifest-invalid'
     | 'no-db'
     | 'gap-exceeded'
     | 'forced'
     | 'incremental-success'
     | 'incremental-failed'
-    | 'full-success'
     | 'full-failed';
 
 export interface SyncStatus {
@@ -490,15 +490,18 @@ export async function sync(
         manifest = await fetchExtractsManifest(config.extractsUrl);
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.error('[SYNC] Could not fetch /v1/Extracts manifest; aborting sync.', e);
-        recordDecision('manifest-fetch-failed', undefined, msg);
+        const reason: SyncReason = msg.includes('unexpected response shape')
+            ? 'manifest-invalid'
+            : 'manifest-fetch-failed';
+        console.error(`[SYNC] Manifest ${reason}: ${msg}`);
+        recordDecision(reason, undefined, msg);
         return;
     }
 
     const fullEntry = manifest.find(e => e.IsFullExtract);
     if (!fullEntry) {
         console.error('[SYNC] Manifest has no full extract entry; aborting.');
-        recordDecision('manifest-fetch-failed', undefined, 'no full entry in manifest');
+        recordDecision('manifest-invalid', undefined, 'no full entry in manifest');
         return;
     }
 
@@ -549,10 +552,14 @@ export async function sync(
                     if (!item) {
                         throw new Error(`Incremental entry for ${entry.DateOfChanges} has no spectra_rrl item`);
                     }
-                    const zipPath = path.join(changesDir, item.FileName);
-                    console.error(`Downloading ${item.FileUrl}...`);
+                    const safeName = path.basename(item.FileName);
+                    if (!safeName || safeName !== item.FileName) {
+                        throw new Error(`Suspicious FileName in manifest: ${item.FileName}`);
+                    }
+                    const zipPath = path.join(changesDir, safeName);
+                    console.error(`[SYNC] Downloading ${item.FileUrl}...`);
                     await downloadFile(item.FileUrl, zipPath);
-                    console.error(`Applying ${item.FileName}...`);
+                    console.error(`[SYNC] Applying ${safeName}...`);
                     await applyCsvDiffZip(zipPath, config.dbPath);
                 }
 

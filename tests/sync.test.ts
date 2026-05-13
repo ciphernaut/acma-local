@@ -688,7 +688,7 @@ describe('sync() orchestrator (mocked axios)', () => {
 
         const status = getSyncStatus();
         expect(status.reason).toBe('gap-exceeded');
-        expect(status.mode).toBeUndefined();
+        expect('mode' in status).toBe(false);
         expect(status.detail).toMatch(/h behind/);
         expect(axiosGetSpy).toHaveBeenCalledTimes(1); // ONLY the manifest call
     });
