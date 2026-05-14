@@ -508,8 +508,16 @@ function createServer(): Server {
         if (name === 'search_licences') {
             const db = openDb();
             try {
-                const results = searchLicences(db, args?.query as string, (args?.limit as number) ?? 10);
-                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+                const rows = searchLicences(db, args?.query as string, (args?.limit as number) ?? 10) as any[];
+                const envelope: any = { rows };
+                if (rows.length > 0 && rows[0]?.LICENCE_NO) {
+                    envelope._hints = [{
+                        tool: 'get_licence_details',
+                        args: { licence_no: rows[0].LICENCE_NO },
+                        why: 'devices + holder for the first result',
+                    }];
+                }
+                return { content: [{ type: 'text', text: JSON.stringify(envelope, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }
 
@@ -531,6 +539,13 @@ function createServer(): Server {
 
                 const response: any = { ...result };
                 if (resultId) response.result_id = resultId;
+                if (resultId && (result.devices as any[]).some((d: any) => d.LATITUDE != null && d.LONGITUDE != null)) {
+                    response._hints = [{
+                        tool: 'export_kml',
+                        args: { result_id: resultId },
+                        why: 'render geospatially',
+                    }];
+                }
 
                 return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } finally { if (db.open) db.close(); }
@@ -539,20 +554,28 @@ function createServer(): Server {
         if (name === 'search_sites') {
             const db = openDb();
             try {
-                const results = searchSites(db, args?.query as string, (args?.limit as number) ?? 10);
+                const rows = searchSites(db, args?.query as string, (args?.limit as number) ?? 10) as any[];
 
                 // Cache results for potential KML export
                 let resultId: string | undefined;
-                if (results.length > 0) {
-                    const columns = Object.keys(results[0] as object);
+                if (rows.length > 0) {
+                    const columns = Object.keys(rows[0] as object);
                     if (hasGeospatialData(columns)) {
-                        const rows = results.map(r => columns.map(c => (r as any)[c]));
-                        resultId = cacheResult(columns, rows);
+                        const rowArrays = rows.map(r => columns.map(c => (r as any)[c]));
+                        resultId = cacheResult(columns, rowArrays);
                     }
                 }
 
-                const response: any = { results, result_id: resultId };
-                return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+                const envelope: any = { rows };
+                if (resultId) envelope.result_id = resultId;
+                if (rows.length > 0) {
+                    envelope._hints = [{
+                        tool: 'get_site_details',
+                        args: { site_id: String(rows[0].SITE_ID) },
+                        why: 'devices at this site',
+                    }];
+                }
+                return { content: [{ type: 'text', text: JSON.stringify(envelope, null, 2) }] };
             } finally { if (db.open) db.close(); }
         }
 
@@ -572,6 +595,13 @@ function createServer(): Server {
 
                 const response: any = { ...result };
                 if (resultId) response.result_id = resultId;
+                if (resultId) {
+                    response._hints = [{
+                        tool: 'export_kml',
+                        args: { result_id: resultId },
+                        why: 'render geospatially',
+                    }];
+                }
 
                 return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } finally { if (db.open) db.close(); }
@@ -609,12 +639,20 @@ function createServer(): Server {
         if (name === 'search_application_text') {
             const db = openDb();
             try {
-                const results = searchApplicationText(
+                const rows = searchApplicationText(
                     db,
                     args?.query as string,
                     (args?.limit as number) ?? 20
-                );
-                return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+                ) as any[];
+                const envelope: any = { rows };
+                if (rows.length > 0 && rows[0]?.APTB_ID != null) {
+                    envelope._hints = [{
+                        tool: 'execute_sql',
+                        args: { sql: `SELECT APTB_TEXT FROM applic_text_block WHERE APTB_ID = ${rows[0].APTB_ID}` },
+                        why: 'full text for the first result',
+                    }];
+                }
+                return { content: [{ type: 'text', text: JSON.stringify(envelope, null, 2) }] };
             } finally { db.close(); }
         }
 
@@ -705,7 +743,14 @@ function createServer(): Server {
                 }
 
                 const response: any = { ...result };
-                if (resultId) response.result_id = resultId;
+                if (resultId) {
+                    response.result_id = resultId;
+                    response._hints = [{
+                        tool: 'export_kml',
+                        args: { result_id: resultId },
+                        why: 'render geospatially',
+                    }];
+                }
 
                 return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
             } catch (err: any) {

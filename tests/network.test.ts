@@ -207,6 +207,51 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         await transport.close();
     }, 15000);
 
+    // ─── _hints tests ─────────────────────────────────────────────────────────
+
+    async function callMcpTool(toolName: string, toolArgs: Record<string, unknown>): Promise<string> {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+        const result = await client.callTool({ name: toolName, arguments: toolArgs }) as any;
+        await transport.close();
+        return result.content[0].text as string;
+    }
+
+    test('search_licences result includes _hints pointing at get_licence_details', async () => {
+        const response = await callMcpTool('search_licences', { query: '1', limit: 1 });
+        const parsed = JSON.parse(response);
+        // Response is now an envelope: { rows, _hints? }
+        expect(Array.isArray(parsed.rows)).toBe(true);
+        if (parsed.rows.length > 0) {
+            expect(parsed._hints).toBeDefined();
+            expect(parsed._hints[0].tool).toBe('get_licence_details');
+            expect(parsed._hints[0].args).toHaveProperty('licence_no');
+        }
+    }, 15000);
+
+    test('search_sites result includes _hints pointing at get_site_details', async () => {
+        const response = await callMcpTool('search_sites', { query: '2000', limit: 1 });
+        const parsed = JSON.parse(response);
+        expect(Array.isArray(parsed.rows)).toBe(true);
+        if (parsed.rows.length > 0) {
+            expect(parsed._hints).toBeDefined();
+            expect(parsed._hints[0].tool).toBe('get_site_details');
+        }
+    }, 15000);
+
+    test('search_clients result has no _hints (no follow-up tool)', async () => {
+        const response = await callMcpTool('search_clients', { query: 'Test', limit: 1 });
+        const parsed = JSON.parse(response);
+        // search_clients still returns a flat array OR an envelope without _hints.
+        // Either acceptable — but no _hints field should be present.
+        if (parsed._hints !== undefined) {
+            throw new Error('search_clients should not emit _hints');
+        }
+    }, 15000);
+
+    // ─── End _hints tests ──────────────────────────────────────────────────────
+
     test('every advertised tool has a TOOL_DOCS entry', async () => {
         // Read TOOL_DOCS via dynamic import to avoid module side-effects at file load time.
         const { TOOL_DOCS } = await import('../src/index');
