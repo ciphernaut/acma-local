@@ -62,6 +62,34 @@ describe('executeSql', () => {
             executeSql(db, "UPDATE site SET NAME='x' WHERE SITE_ID='S1'")
         ).toThrow(/SELECT/i);
     });
+
+    test('executeSql accepts CTE (WITH ... SELECT ...) queries', () => {
+        const db = new Database(':memory:');
+        db.exec(`CREATE TABLE t(id INTEGER); INSERT INTO t VALUES (1), (2), (3);`);
+        const result = executeSql(db, 'WITH doubled AS (SELECT id * 2 AS d FROM t) SELECT d FROM doubled', 100);
+        db.close();
+        expect(result.rows.map(r => r[0])).toEqual([2, 4, 6]);
+    });
+
+    test('executeSql accepts WITH RECURSIVE queries', () => {
+        const db = new Database(':memory:');
+        const result = executeSql(
+            db,
+            'WITH RECURSIVE counter(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM counter WHERE n < 3) SELECT n FROM counter',
+            100
+        );
+        db.close();
+        expect(result.rows.map(r => r[0])).toEqual([1, 2, 3]);
+    });
+
+    test('executeSql still rejects mutating statements', () => {
+        const db = new Database(':memory:');
+        db.exec(`CREATE TABLE t(id INTEGER);`);
+        expect(() => executeSql(db, 'INSERT INTO t VALUES (1)', 100)).toThrow(/Only SELECT.WITH statements/);
+        expect(() => executeSql(db, 'DELETE FROM t', 100)).toThrow(/Only SELECT.WITH statements/);
+        expect(() => executeSql(db, 'DROP TABLE t', 100)).toThrow(/Only SELECT.WITH statements/);
+        db.close();
+    });
 });
 
 describe('listSampleQueries', () => {
