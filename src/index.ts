@@ -4,7 +4,8 @@
  * Per-session StreamableHTTPServerTransport (official MCP multi-client pattern).
  * Full tool catalog: search_sites, search_licences, search_clients,
  *                    get_licence_details, get_site_details, sync_data,
- *                    execute_sql, list_sample_queries, export_kml.
+ *                    execute_sql, list_sample_queries, export_kml,
+ *                    search_bsl, search_spectrum_band, search_application_text.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -76,7 +77,7 @@ function openDb() {
 
 function createServer(): Server {
     const server = new Server(
-        { name: 'acma-rrl-server', version: '1.5.0' },
+        { name: 'acma-rrl-server', version: '1.7.0' },
         { capabilities: { tools: {} } }
     );
 
@@ -650,7 +651,7 @@ async function main() {
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
         console.error(`ACMA RRL MCP Server v1.6.0 running on port ${port} at http://localhost:${port}/mcp`);
-        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml');
+        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text');
     });
 }
 

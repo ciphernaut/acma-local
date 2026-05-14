@@ -103,6 +103,22 @@ describe('T2 tables', () => {
         expect(cols.find(c => c.name === col)).toBeDefined();
     });
 
+});
+
+describe('T3 tables', () => {
+    const scratchDir = path.join(__dirname, '../scratch_test_t3');
+    const dbPath = path.join(scratchDir, 'test_acma.db');
+
+    beforeEach(() => {
+        if (!fs.existsSync(scratchDir)) fs.mkdirSync(scratchDir);
+        if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+        initializeDatabase(dbPath);
+    });
+
+    afterAll(() => {
+        if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    });
+
     test('satellite table exists with SA_ID column', () => {
         const db = new Database(dbPath, { readonly: true });
         const cols = db.prepare("PRAGMA table_info(satellite)").all() as any[];
@@ -135,5 +151,14 @@ describe('T4 tables', () => {
         db.close();
         expect(cols.length).toBeGreaterThan(0);
         expect(cols.find(c => c.name === col)).toBeDefined();
+    });
+
+    test('applic_text_block_fts virtual table exists', () => {
+        const db = new Database(dbPath, { readonly: true });
+        const row = db.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='applic_text_block_fts'"
+        ).get() as { name?: string } | undefined;
+        db.close();
+        expect(row?.name).toBe('applic_text_block_fts');
     });
 });
