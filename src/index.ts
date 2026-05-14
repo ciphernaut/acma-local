@@ -15,6 +15,7 @@ import {
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Database from 'better-sqlite3';
+import { initializeDatabase } from './db.js';
 import { DEFAULT_CONFIG, sync, getSyncStatus } from './sync.js';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
@@ -345,7 +346,7 @@ function openDb() {
 
 function createServer(): Server {
     const server = new Server(
-        { name: 'acma-rrl-server', version: '1.7.0' },
+        { name: 'acma-rrl-server', version: '1.8.0' },
         { capabilities: { tools: {} } }
     );
 
@@ -923,6 +924,11 @@ function createServer(): Server {
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
 async function main() {
+    // Ensure the schema is current. CREATE TABLE IF NOT EXISTS is idempotent,
+    // so this is safe on existing DBs and adds any tables that landed in
+    // later releases (e.g. an older sync'd DB pulling a new spectrum_* table).
+    initializeDatabase(dbPath);
+
     const app = express();
     app.use(express.json());
 
@@ -981,8 +987,8 @@ async function main() {
 
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
-        console.error(`ACMA RRL MCP Server v1.7.0 running on port ${port} at http://localhost:${port}/mcp`);
-        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, describe_schema, describe_tool, explain_query');
+        console.error(`ACMA RRL MCP Server v1.8.0 running on port ${port} at http://localhost:${port}/mcp`);
+        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query');
     });
 }
 
