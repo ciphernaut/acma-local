@@ -17,10 +17,10 @@ function runQuery(dbPath, sql, limit) {
     if (!trimmed) throw new Error('SQL query cannot be empty.');
 
     const firstWord = (trimmed.split(/\s+/)[0] || '').toUpperCase();
-    if (firstWord !== 'SELECT') {
+    if (firstWord !== 'SELECT' && firstWord !== 'WITH') {
         throw new Error(
-            `Only SELECT statements are allowed. Received: ${firstWord}. ` +
-            `Use execute_sql for querying data only.`
+            `Only SELECT/WITH statements are allowed. Received: ${firstWord}. ` +
+            `Use execute_sql for read-only queries only.`
         );
     }
 
