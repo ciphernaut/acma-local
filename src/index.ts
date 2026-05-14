@@ -885,7 +885,7 @@ async function main() {
 
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
-        console.error(`ACMA RRL MCP Server v1.6.0 running on port ${port} at http://localhost:${port}/mcp`);
+        console.error(`ACMA RRL MCP Server v1.7.0 running on port ${port} at http://localhost:${port}/mcp`);
         console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, describe_schema, describe_tool, explain_query');
     });
 }
