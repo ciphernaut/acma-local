@@ -35,10 +35,14 @@ function main() {
     const argv = process.argv.slice(2);
     const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
 
+    // Always ensure the schema exists. initializeDatabase uses CREATE TABLE
+    // IF NOT EXISTS, so this is idempotent on existing DBs and adds any
+    // tables that landed in later code versions (e.g. spectrum_* added after
+    // the DB was first synced under an older schema).
     if (!fs.existsSync(dbPath)) {
         console.error(`Initialising new DB at ${dbPath}`);
-        initializeDatabase(dbPath);
     }
+    initializeDatabase(dbPath);
 
     if (argv[0] === 'dump') {
         const outPath = getArg(argv, '--out') ?? DEFAULT_SEED_PATH;
