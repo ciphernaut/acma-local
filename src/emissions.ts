@@ -143,3 +143,93 @@ export function parseEmissionBandwidth(first4: string): { value_hz: number; disp
 
     return { value_hz, display };
 }
+
+export interface DecodedField { code: string; description: string }
+export interface DecodedModulation extends DecodedField { group: string }
+
+export interface DecodedEmission {
+    input: string;
+    normalised: string;
+    valid: boolean;
+    bandwidth: { value_hz: number; display: string; raw: string } | null;
+    modulation: DecodedModulation | null;
+    signal_nature: DecodedField | null;
+    info_type: DecodedField | null;
+    signal_detail: DecodedField | null;
+    multiplex: DecodedField | null;
+    warnings: string[];
+}
+
+function lookupCode<F extends EmissionField>(field: F, code: string): { code: string; description: string; group?: string } | null {
+    const table = CODE_TABLES[field] as Record<string, { description: string; group?: string }>;
+    const entry = table[code];
+    if (!entry) return null;
+    return { code, ...entry };
+}
+
+export function decodeEmissionDesignator(input: string): DecodedEmission {
+    const warnings: string[] = [];
+    const trimmed = input.trim();
+    if (trimmed !== input && trimmed.length > 0) {
+        warnings.push('Input had leading/trailing whitespace, which was trimmed.');
+    }
+    const normalised = trimmed.toUpperCase();
+
+    const empty: DecodedEmission = {
+        input, normalised, valid: false,
+        bandwidth: null, modulation: null, signal_nature: null,
+        info_type: null, signal_detail: null, multiplex: null,
+        warnings,
+    };
+
+    if (normalised.length === 0) {
+        warnings.push('Empty input.');
+        return empty;
+    }
+    if (normalised.length !== 7 && normalised.length !== 9) {
+        warnings.push(`Designator length must be 7 or 9 characters, got ${normalised.length}.`);
+        return empty;
+    }
+
+    // Bandwidth (positions 0-3).
+    let bandwidth: DecodedEmission['bandwidth'] = null;
+    const bwRaw = normalised.slice(0, 4);
+    try {
+        const parsed = parseEmissionBandwidth(bwRaw);
+        bandwidth = { ...parsed, raw: bwRaw };
+    } catch (e) {
+        warnings.push(`Bandwidth parse failed: ${(e as Error).message}`);
+        return { ...empty, warnings };
+    }
+
+    // Required body (positions 4, 5, 6).
+    const modulation = lookupCode('modulation', normalised[4]!);
+    const signal_nature = lookupCode('signal_nature', normalised[5]!);
+    const info_type = lookupCode('info_type', normalised[6]!);
+    if (!modulation) warnings.push(`Unknown modulation code "${normalised[4]}".`);
+    if (!signal_nature) warnings.push(`Unknown signal-nature code "${normalised[5]}".`);
+    if (!info_type) warnings.push(`Unknown info-type code "${normalised[6]}".`);
+
+    const requiredValid = modulation !== null && signal_nature !== null && info_type !== null;
+
+    // Optional tail (positions 7, 8) when length === 9.
+    let signal_detail: DecodedField | null = null;
+    let multiplex: DecodedField | null = null;
+    if (normalised.length === 9) {
+        signal_detail = lookupCode('signal_detail', normalised[7]!);
+        multiplex = lookupCode('multiplex', normalised[8]!);
+        if (!signal_detail) warnings.push(`Unknown signal-detail code "${normalised[7]}".`);
+        if (!multiplex) warnings.push(`Unknown multiplex code "${normalised[8]}".`);
+    }
+
+    return {
+        input, normalised, valid: requiredValid,
+        bandwidth,
+        modulation: modulation ? (modulation as DecodedModulation) : null,
+        signal_nature,
+        info_type,
+        signal_detail,
+        multiplex,
+        warnings,
+    };
+}
