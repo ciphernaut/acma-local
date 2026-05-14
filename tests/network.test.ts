@@ -195,7 +195,7 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         await transport.close();
     }, 15000);
 
-    test('tools/list includes explain_query as the 15th tool', async () => {
+    test('tools/list advertises the full 16-tool catalog', async () => {
         const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
         const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
         await client.connect(transport);
@@ -203,7 +203,8 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         const tools = await client.listTools();
         expect(tools.tools.some(t => t.name === 'describe_tool')).toBe(true);
         expect(tools.tools.some(t => t.name === 'explain_query')).toBe(true);
-        expect(tools.tools.length).toBe(15);
+        expect(tools.tools.some(t => t.name === 'get_frequency_allocation')).toBe(true);
+        expect(tools.tools.length).toBe(16);
 
         await transport.close();
     }, 15000);
@@ -253,14 +254,62 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
 
     // ─── End _hints tests ──────────────────────────────────────────────────────
 
+    // ─── get_frequency_allocation integration tests ───────────────────────────
+
+    test('get_frequency_allocation returns "data not loaded" error when spectrum tables are empty', async () => {
+        // The test DB is initialised but the spectrum_* tables have no rows yet
+        // (the spectrum-plan seed is only auto-applied at the tail of performFullSync,
+        // which doesn't run in this integration setup). The tool should detect this
+        // and return a structured _error envelope rather than an empty array.
+        const response = await callMcpTool('get_frequency_allocation', { freq_hz: 87100000 });
+        const parsed = JSON.parse(response);
+        expect(parsed._error).toBeDefined();
+        expect(parsed._error).toMatch(/spectrum plan data not loaded/i);
+    }, 15000);
+
+    test('get_frequency_allocation returns matching allocation + footnotes after seeding', async () => {
+        // Seed the spectrum tables directly via applyReseed so the next call to
+        // the MCP tool has data to return. We use a tiny fixture rather than
+        // the full seed/spectrum_plan.sql so the test stays fast and offline-safe.
+        const Database = (await import('better-sqlite3')).default;
+        const { applyReseed } = await import('../src/spectrum_plan.js');
+        const fixture = path.join(__dirname, 'fixtures', 'spectrum_plan_smoke.sql');
+        if (!fs.existsSync(path.dirname(fixture))) fs.mkdirSync(path.dirname(fixture), { recursive: true });
+        fs.writeFileSync(fixture, `BEGIN TRANSACTION;
+INSERT INTO spectrum_allocations VALUES(87000000, 108000000, '87-108', 'MHz', '', '', 'BROADCASTING', 'BROADCASTING', 'FM broadcast band', '5.87 AUS37');
+INSERT INTO spectrum_australian_footnotes VALUES('AUS37', 'AUS37 body.');
+INSERT INTO spectrum_international_footnotes VALUES('5.87', '5.87 ITU body.');
+INSERT INTO spectrum_plan_meta VALUES('source_description', 'Smoke fixture');
+INSERT INTO spectrum_plan_meta VALUES('published_date', '2018-01-01');
+COMMIT;
+`);
+        const seedDb = new Database(testDbPath);
+        try {
+            applyReseed(seedDb, fixture);
+        } finally { seedDb.close(); }
+
+        const response = await callMcpTool('get_frequency_allocation', { freq_hz: 87100000 });
+        const parsed = JSON.parse(response);
+        expect(parsed.match_count).toBe(1);
+        expect(parsed.allocations[0].australian_table_of_allocations).toBe('BROADCASTING');
+        expect(parsed.allocations[0].footnotes.australian[0].ref).toBe('AUS37');
+        expect(parsed._warning).toMatch(/8 years old|published 2018/);  // staleness warning fires for 2018-01-01
+        expect(parsed._hints).toBeDefined();
+        expect(parsed._hints.some((h: any) => h.tool === 'search_licences')).toBe(true);
+
+        fs.unlinkSync(fixture);
+    }, 15000);
+
+    // ─── End get_frequency_allocation tests ───────────────────────────────────
+
     test('every advertised tool has a TOOL_DOCS entry', async () => {
         // Read TOOL_DOCS via dynamic import to avoid module side-effects at file load time.
         const { TOOL_DOCS } = await import('../src/index');
         const advertised = [
             'search_licences', 'get_licence_details', 'search_sites', 'get_site_details',
             'search_clients', 'search_bsl', 'search_spectrum_band', 'search_application_text',
-            'sync_data', 'list_sample_queries', 'execute_sql', 'export_kml',
-            'describe_schema', 'describe_tool', 'explain_query',
+            'get_frequency_allocation', 'sync_data', 'list_sample_queries', 'execute_sql',
+            'export_kml', 'describe_schema', 'describe_tool', 'explain_query',
         ];
         for (const name of advertised) {
             expect(TOOL_DOCS[name]).toBeDefined();

@@ -1021,7 +1021,12 @@ async function main() {
     process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-main().catch(err => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-});
+// Only auto-run main() when this file is the entry point — not when imported
+// (e.g. tests/network.test.ts imports this module to read TOOL_DOCS).
+// Mirrors the pattern in src/sync.ts.
+if (process.argv[1]?.endsWith('index.ts') || process.argv[1]?.endsWith('index.js')) {
+    main().catch(err => {
+        console.error('Fatal error:', err);
+        process.exit(1);
+    });
+}
