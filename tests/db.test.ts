@@ -163,6 +163,30 @@ describe('T4 tables', () => {
     });
 });
 
+describe('emission_* lookup tables', () => {
+    test('emission_* lookup tables are created by initializeDatabase', () => {
+        const tmpDb = path.join(__dirname, `db_emis_${Date.now()}.db`);
+        try {
+            initializeDatabase(tmpDb);
+            const db = new Database(tmpDb);
+            try {
+                const tables = (db.prepare(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'emission_%' ORDER BY name"
+                ).all() as Array<{ name: string }>).map(r => r.name);
+                expect(tables).toEqual([
+                    'emission_info_type',
+                    'emission_modulation',
+                    'emission_multiplex',
+                    'emission_signal_detail',
+                    'emission_signal_nature',
+                ]);
+            } finally { db.close(); }
+        } finally {
+            if (fs.existsSync(tmpDb)) fs.unlinkSync(tmpDb);
+        }
+    });
+});
+
 describe('Spectrum-plan tables', () => {
     const scratchDir = path.join(__dirname, '../scratch_test_spectrum_ddl');
     const dbPath = path.join(scratchDir, 'test_acma.db');

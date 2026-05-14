@@ -291,6 +291,37 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
       );
     `
   },
+  "emission_modulation": {
+    "ddl": `CREATE TABLE IF NOT EXISTS emission_modulation(
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      group_name TEXT NOT NULL
+    );`
+  },
+  "emission_signal_nature": {
+    "ddl": `CREATE TABLE IF NOT EXISTS emission_signal_nature(
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL
+    );`
+  },
+  "emission_info_type": {
+    "ddl": `CREATE TABLE IF NOT EXISTS emission_info_type(
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL
+    );`
+  },
+  "emission_signal_detail": {
+    "ddl": `CREATE TABLE IF NOT EXISTS emission_signal_detail(
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL
+    );`
+  },
+  "emission_multiplex": {
+    "ddl": `CREATE TABLE IF NOT EXISTS emission_multiplex(
+      code TEXT PRIMARY KEY,
+      description TEXT NOT NULL
+    );`
+  },
   "meta": {
     "ddl": `
       CREATE TABLE IF NOT EXISTS meta(
