@@ -55,6 +55,8 @@ function main(): void {
     process.exit(1);
 }
 
+// Run main() only when invoked as a CLI, not when imported by tests/modules.
+// (Mirrors src/sync.ts; prevents the file from spawning a CLI on `import`.)
 if (process.argv[1]?.endsWith('import_emissions.ts') || process.argv[1]?.endsWith('import_emissions.js')) {
     main();
 }
