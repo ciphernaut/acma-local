@@ -11,6 +11,8 @@
     "test": "jest",
     "dev": "tsx src/index.ts",
     "sync": "tsx src/sync.ts",
+    "import-spectrum-plan": "tsx src/import_spectrum_plan.ts",
+    "dump-spectrum-plan": "tsx src/import_spectrum_plan.ts dump",
     "build": "tsc"
   },
   "keywords": [],
