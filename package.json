@@ -19,6 +19,8 @@
     "sync": "tsx src/sync.ts",
     "import-spectrum-plan": "tsx src/import_spectrum_plan.ts",
     "dump-spectrum-plan": "tsx src/import_spectrum_plan.ts dump",
+    "import-emissions": "tsx src/import_emissions.ts --reseed",
+    "dump-emissions":   "tsx src/import_emissions.ts --dump",
     "build": "tsc"
   },
   "keywords": [],
