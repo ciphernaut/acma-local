@@ -316,11 +316,13 @@ Run a read-only SELECT query directly against the ACMA RRL SQLite database.
 - If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for optional KML export via export_kml
 
 ## Available tables
-client, licence, site, device_details, antenna, antenna_pattern, antenna_polarity,
-access_area, applic_text_block, auth_spectrum_area, auth_spectrum_freq,
-bsl, bsl_area, class_of_station, client_type, fee_status, industry_cat,
-licence_service, licence_status, licence_subservice, licensing_area,
-nature_of_service, reports_text_block, satellite, meta
+client, licence, site, device_details, antenna,
+bsl, bsl_area, auth_spectrum_freq, auth_spectrum_area, satellite,
+applic_text_block, applic_text_block_fts, reports_text_block,
+client_type, fee_status, industry_cat,
+licence_service, licence_subservice, licence_status,
+nature_of_service, class_of_station, licensing_area, antenna_polarity,
+meta
 
 ## Output
 { columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string }`,
