@@ -755,8 +755,10 @@ describe('sync() orchestrator (mocked axios)', () => {
         expect(status.mode).toBe('full');
         const db = new Database(dbPath, { readonly: true });
         const row = db.prepare("SELECT value FROM meta WHERE key = 'as_of'").get() as any;
+        const n = (db.prepare('SELECT COUNT(*) AS n FROM emission_modulation').get() as { n: number }).n;
         db.close();
         expect(row.value).toBe('2026-05-12T21:51:36Z');
+        expect(n).toBe(18);
     });
 
     test('gap-exceeded — auto mode does NOT trigger full download', async () => {

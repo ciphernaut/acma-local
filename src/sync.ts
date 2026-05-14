@@ -9,6 +9,7 @@ import { pipeline } from 'stream/promises';
 import { fileURLToPath } from 'url';
 import { initializeDatabase, TABLE_METADATA } from './db.js';
 import { bootstrapSpectrumPlan } from './spectrum_plan.js';
+import { bootstrapEmissionTables } from './emissions.js';
 import { log } from './logger.js';
 
 export interface SyncConfig {
@@ -498,6 +499,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         const bsDb = new Database(config.dbPath);
         try {
             bootstrapSpectrumPlan(bsDb, seedPath);
+            bootstrapEmissionTables(bsDb, path.join(seedDir, 'emissions.sql'));
         } finally {
             bsDb.close();
         }
