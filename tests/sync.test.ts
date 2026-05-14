@@ -840,3 +840,27 @@ describe('sync() orchestrator (mocked axios)', () => {
         expect(clientRow.LICENCEE).toBe('Updated Name');
     });
 });
+
+describe('ANALYZE after full sync', () => {
+    const scratchDir = path.join(__dirname, '../scratch_test_analyze');
+    const dbPath = path.join(scratchDir, 'test_acma.db');
+
+    beforeEach(() => {
+        if (!fs.existsSync(scratchDir)) fs.mkdirSync(scratchDir);
+        if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    });
+
+    afterAll(() => {
+        if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
+    });
+
+    test('ANALYZE populates sqlite_stat1', () => {
+        initializeDatabase(dbPath);
+        const db = new Database(dbPath);
+        db.exec(`INSERT INTO client (CLIENT_NO, LICENCEE) VALUES (1, 'Test')`);
+        db.exec('ANALYZE');
+        const stat = db.prepare("SELECT name FROM sqlite_master WHERE name = 'sqlite_stat1'").get();
+        db.close();
+        expect(stat).toBeDefined();
+    });
+});

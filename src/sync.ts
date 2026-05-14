@@ -460,6 +460,16 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
             ftsDb.close();
         }
 
+        // Refresh query planner statistics. ANALYZE on the 22-table corpus
+        // completes in a few seconds; cheap insurance for downstream queries.
+        console.error('Running ANALYZE for query planner...');
+        const anDb = new Database(config.dbPath);
+        try {
+            anDb.exec('ANALYZE;');
+        } finally {
+            anDb.close();
+        }
+
         const db = new Database(config.dbPath);
         try {
             db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', fullEntry.LastMdified);
