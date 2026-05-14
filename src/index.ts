@@ -5,7 +5,8 @@
  * Full tool catalog: search_sites, search_licences, search_clients,
  *                    get_licence_details, get_site_details, sync_data,
  *                    execute_sql, list_sample_queries, export_kml,
- *                    search_bsl, search_spectrum_band, search_application_text.
+ *                    search_bsl, search_spectrum_band, search_application_text,
+ *                    describe_schema, describe_tool.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -806,7 +807,7 @@ async function main() {
     const port = Number(PORT);
     app.listen(port, '0.0.0.0', () => {
         console.error(`ACMA RRL MCP Server v1.6.0 running on port ${port} at http://localhost:${port}/mcp`);
-        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text');
+        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, describe_schema, describe_tool');
     });
 }
 

@@ -206,4 +206,21 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
 
         await transport.close();
     }, 15000);
+
+    test('every advertised tool has a TOOL_DOCS entry', async () => {
+        // Read TOOL_DOCS via dynamic import to avoid module side-effects at file load time.
+        const { TOOL_DOCS } = await import('../src/index');
+        const advertised = [
+            'search_licences', 'get_licence_details', 'search_sites', 'get_site_details',
+            'search_clients', 'search_bsl', 'search_spectrum_band', 'search_application_text',
+            'sync_data', 'list_sample_queries', 'execute_sql', 'export_kml',
+            'describe_schema', 'describe_tool',
+        ];
+        for (const name of advertised) {
+            expect(TOOL_DOCS[name]).toBeDefined();
+            expect(TOOL_DOCS[name]!.summary.length).toBeLessThan(200);
+            expect(TOOL_DOCS[name]!.tags.length).toBeGreaterThan(0);
+            expect(TOOL_DOCS[name]!.fullDescription.length).toBeGreaterThan(50);
+        }
+    });
 });
