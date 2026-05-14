@@ -187,4 +187,64 @@ COMMIT;
             expect(auCount).toBe(1);
         } finally { db.close(); }
     });
+
+    test('throws when source file does not exist', () => {
+        const db = new Database(dbPath);
+        try {
+            expect(() => applyReseed(db, path.join(scratchDir, 'no_such_file.sql'))).toThrow(/source not found/i);
+        } finally { db.close(); }
+    });
+
+    test('skips source rows with missing range or unit (does not default unit)', () => {
+        const sourceDbPath = path.join(scratchDir, 'source_null.db');
+        if (fs.existsSync(sourceDbPath)) fs.unlinkSync(sourceDbPath);
+        const sdb = new Database(sourceDbPath);
+        sdb.exec(`
+            CREATE TABLE allocations(
+                frequency_range TEXT, unit TEXT, region1 TEXT, region2 TEXT, region3 TEXT,
+                australian_table_of_allocations TEXT, common TEXT, footnote_ref TEXT
+            );
+            CREATE TABLE australian_footnotes(footnote_ref TEXT, footnote_text TEXT);
+            CREATE TABLE international_footnotes(footnote_ref TEXT, footnote_text TEXT);
+            INSERT INTO allocations VALUES('87-88', NULL, '', '', 'BROADCASTING', '', '', '');
+            INSERT INTO allocations VALUES(NULL, 'MHz', '', '', 'BROADCASTING', '', '', '');
+            INSERT INTO allocations VALUES('87-88', 'MHz', '', '', 'BROADCASTING', '', '', '');
+        `);
+        sdb.close();
+
+        const db = new Database(dbPath);
+        try {
+            applyReseed(db, sourceDbPath);
+            const n = (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n;
+            expect(n).toBe(1);  // Only the third row survives
+        } finally { db.close(); }
+    });
+
+    test('atomic: if load fails mid-way, original data is preserved', () => {
+        // Seed: 2 rows
+        const initial = `BEGIN TRANSACTION;
+INSERT INTO spectrum_allocations VALUES(1,2,'a','Hz','','','','','','');
+INSERT INTO spectrum_allocations VALUES(3,4,'b','Hz','','','','','','');
+COMMIT;`;
+        const initPath = path.join(scratchDir, 'init.sql');
+        fs.writeFileSync(initPath, initial);
+        const db = new Database(dbPath);
+        try {
+            applyReseed(db, initPath);
+            expect((db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n).toBe(2);
+
+            // Bad seed: syntax error halfway through
+            const bad = `BEGIN TRANSACTION;
+INSERT INTO spectrum_allocations VALUES(99,100,'c','Hz','','','','','','');
+THIS IS NOT VALID SQL;
+COMMIT;`;
+            const badPath = path.join(scratchDir, 'bad.sql');
+            fs.writeFileSync(badPath, bad);
+
+            expect(() => applyReseed(db, badPath)).toThrow();
+
+            // Original 2 rows must still be present (rollback)
+            expect((db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n).toBe(2);
+        } finally { db.close(); }
+    });
 });

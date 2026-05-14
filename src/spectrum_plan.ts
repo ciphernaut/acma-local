@@ -4,6 +4,11 @@
  * See docs/superpowers/specs/2026-05-14-spectrum-plan-integration-design.md.
  */
 
+import type { Database as BetterSqlite3Database } from 'better-sqlite3';
+import Database from 'better-sqlite3';
+import * as fs from 'fs';
+import * as path from 'path';
+
 const UNIT_MULTIPLIER: Record<string, number> = {
     'Hz': 1,
     'kHz': 1_000,
@@ -69,11 +74,6 @@ export function parseFrequencyRange(rangeText: string, unit: string): { freq_sta
     };
 }
 
-import type { Database as BetterSqlite3Database } from 'better-sqlite3';
-import Database from 'better-sqlite3';
-import * as fs from 'fs';
-import * as path from 'path';
-
 const SPECTRUM_TABLES = [
     'spectrum_allocations',
     'spectrum_australian_footnotes',
@@ -89,6 +89,10 @@ const SPECTRUM_TABLES = [
  *   - .db / .sqlite / any other → opened as SQLite, copied via SELECT
  *     with parseFrequencyRange normalisation
  *
+ * The entire operation (wipe + load + meta updates) runs under a single
+ * SAVEPOINT so a failure during load rolls back to the prior state rather
+ * than leaving the spectrum tables empty.
+ *
  * Always updates spectrum_plan_meta.imported_at to the current ISO timestamp.
  */
 export function applyReseed(db: BetterSqlite3Database, sourcePath: string): void {
@@ -99,33 +103,41 @@ export function applyReseed(db: BetterSqlite3Database, sourcePath: string): void
     const ext = path.extname(sourcePath).toLowerCase();
     const isSql = ext === '.sql';
 
-    const wipe = db.transaction(() => {
+    const savepoint = 'spectrum_reseed';
+    db.exec(`SAVEPOINT ${savepoint}`);
+    try {
         for (const t of SPECTRUM_TABLES) {
             db.exec(`DELETE FROM ${t};`);
         }
-    });
-    wipe();
 
-    if (isSql) {
-        const sql = fs.readFileSync(sourcePath, 'utf-8');
-        db.exec(sql);
-    } else {
-        copyFromSourceDb(db, sourcePath);
+        if (isSql) {
+            const rawSql = fs.readFileSync(sourcePath, 'utf-8');
+            const stripped = rawSql
+                .replace(/^\s*BEGIN\s+TRANSACTION\s*;/gim, '')
+                .replace(/^\s*COMMIT\s*;/gim, '');
+            db.exec(stripped);
+        } else {
+            copyFromSourceDb(db, sourcePath);
+        }
+
+        const now = new Date().toISOString();
+        db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)')
+            .run('imported_at', now);
+
+        const counts = {
+            allocations: (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as any).n,
+            au_footnotes: (db.prepare('SELECT COUNT(*) AS n FROM spectrum_australian_footnotes').get() as any).n,
+            intl_footnotes: (db.prepare('SELECT COUNT(*) AS n FROM spectrum_international_footnotes').get() as any).n,
+        };
+        db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)')
+            .run('row_counts', JSON.stringify(counts));
+
+        db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+        console.error(`[SPECTRUM] Reseeded: ${counts.allocations} allocations, ${counts.au_footnotes} AU footnotes, ${counts.intl_footnotes} intl footnotes`);
+    } catch (e) {
+        db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
+        throw e;
     }
-
-    const now = new Date().toISOString();
-    db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)')
-        .run('imported_at', now);
-
-    const counts = {
-        allocations: (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as any).n,
-        au_footnotes: (db.prepare('SELECT COUNT(*) AS n FROM spectrum_australian_footnotes').get() as any).n,
-        intl_footnotes: (db.prepare('SELECT COUNT(*) AS n FROM spectrum_international_footnotes').get() as any).n,
-    };
-    db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)')
-        .run('row_counts', JSON.stringify(counts));
-
-    console.error(`[SPECTRUM] Reseeded: ${counts.allocations} allocations, ${counts.au_footnotes} AU footnotes, ${counts.intl_footnotes} intl footnotes`);
 }
 
 /**
@@ -158,9 +170,13 @@ function copyFromSourceDb(db: BetterSqlite3Database, sourcePath: string): void {
 
         db.transaction(() => {
             for (const row of allocs) {
+                if (!row.frequency_range || !row.unit) {
+                    console.error(`[SPECTRUM] skip row (missing range or unit): range="${row.frequency_range}" unit="${row.unit}"`);
+                    continue;
+                }
                 let bounds: { freq_start_hz: number; freq_end_hz: number };
                 try {
-                    bounds = parseFrequencyRange(row.frequency_range ?? '', row.unit ?? 'MHz');
+                    bounds = parseFrequencyRange(row.frequency_range, row.unit);
                 } catch (e) {
                     console.error(`[SPECTRUM] skip row (parse failure): "${row.frequency_range}" ${row.unit} — ${(e as Error).message}`);
                     continue;
