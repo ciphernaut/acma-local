@@ -708,6 +708,8 @@ function createServer(): Server {
             if (status.remoteAsOf) freshness.push(`remoteAsOf: ${status.remoteAsOf}`);
             if (status.behindByHours !== undefined) freshness.push(`behindByHours: ${status.behindByHours}`);
             if (status.lastSyncAt) freshness.push(`lastSyncAt: ${status.lastSyncAt}`);
+            if (status.lastFullSyncAt) freshness.push(`lastFullSyncAt: ${status.lastFullSyncAt}`);
+            if (status.lastIncrementalSyncAt) freshness.push(`lastIncrementalSyncAt: ${status.lastIncrementalSyncAt}`);
 
             if (status.isSyncing) {
                 const lines = [

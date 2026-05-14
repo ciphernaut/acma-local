@@ -29,7 +29,8 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
         DATE_OF_EXPIRY TEXT, STATUS TEXT, 
         STATUS_TEXT TEXT, AP_ID INTEGER,
         AP_PRJ_IDENT TEXT, SHIP_NAME TEXT,
-        BSL_NO TEXT, AWL_TYPE TEXT
+        BSL_NO TEXT, AWL_TYPE TEXT,
+        BslAreaId INTEGER
       );
     `,
     "post_load_ddl": `
@@ -171,7 +172,8 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
       CREATE TABLE IF NOT EXISTS auth_spectrum_freq(
         LICENCE_NO TEXT, AREA_CODE TEXT, AREA_NAME TEXT,
         LW_FREQUENCY_START INTEGER, LW_FREQUENCY_END INTEGER,
-        UP_FREQUENCY_START INTEGER, UP_FREQUENCY_END INTEGER
+        UP_FREQUENCY_START INTEGER, UP_FREQUENCY_END INTEGER,
+        DATE_ISSUED TEXT, DATE_OF_EFFECT TEXT, DATE_OF_EXPIRY TEXT
       );
     `,
     "post_load_ddl": `

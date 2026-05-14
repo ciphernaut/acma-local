@@ -231,7 +231,20 @@ function applyCsvDiff(csvBuffer: Buffer, tableName: string, db: Database.Databas
     }
     const pkSpec = PK_BY_TABLE[tableName]!;
     const pkCols: string[] = Array.isArray(pkSpec) ? pkSpec : [pkSpec];
-    const dataCols = columns.filter(c => c !== 'CHANGE');
+
+    // Filter to columns the schema actually declares — tolerate ACMA drift.
+    const schemaColLc = new Set(
+        (db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>)
+            .map(c => c.name.toLowerCase())
+    );
+    const csvDataCols = columns.filter(c => c !== 'CHANGE');
+    const dataCols = csvDataCols.filter(c => schemaColLc.has(c.toLowerCase()));
+    const droppedCols = csvDataCols.filter(c => !schemaColLc.has(c.toLowerCase()));
+    if (droppedCols.length > 0) {
+        console.error(
+            `[SYNC] ${tableName}: skipping ${droppedCols.length} unknown change-zip column(s): ${droppedCols.join(', ')}`
+        );
+    }
     const placeholders = dataCols.map(() => '?').join(',');
     const insertStmt = db.prepare(
         `INSERT INTO ${tableName} (${dataCols.join(',')}) VALUES (${placeholders})`
@@ -324,8 +337,12 @@ export interface SyncStatus {
     detail?: string;
     /** "How fresh is the data?" — mirror of meta.as_of in ISO 8601. */
     dataAsOf?: string;
-    /** "When did our pipeline last successfully run?" — mirror of meta.last_sync. */
+    /** "When did our pipeline last successfully run?" (any kind) — mirror of meta.last_sync. */
     lastSyncAt?: string;
+    /** "When did the most recent full sync complete?" — mirror of meta.last_full_sync. */
+    lastFullSyncAt?: string;
+    /** "When did the most recent incremental sync complete?" — mirror of meta.last_incremental_sync. */
+    lastIncrementalSyncAt?: string;
     /** "What is upstream's latest data?" — last seen manifest full.LastMdified. */
     remoteAsOf?: string;
     /** Derived: (remoteAsOf - dataAsOf) rounded to hours; 0 when current. */
@@ -472,8 +489,10 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
 
         const db = new Database(config.dbPath);
         try {
+            const fullSyncStamp = new Date().toISOString();
             db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', fullEntry.LastMdified);
-            db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
+            db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', fullSyncStamp);
+            db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_full_sync', fullSyncStamp);
         } finally {
             db.close();
         }
@@ -505,12 +524,12 @@ function getDbAsOf(dbPath: string): Date | null {
     }
 }
 
-function getDbLastSync(dbPath: string): Date | null {
+function getDbMetaDate(dbPath: string, key: string): Date | null {
     if (!fs.existsSync(dbPath)) return null;
     try {
         const db = new Database(dbPath, { readonly: true, fileMustExist: true });
         try {
-            const row = db.prepare("SELECT value FROM meta WHERE key = 'last_sync'").get() as { value: string } | undefined;
+            const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
             return row ? new Date(row.value) : null;
         } finally {
             if (db.open) db.close();
@@ -518,6 +537,16 @@ function getDbLastSync(dbPath: string): Date | null {
     } catch {
         return null;
     }
+}
+
+function getDbLastSync(dbPath: string): Date | null {
+    return getDbMetaDate(dbPath, 'last_sync');
+}
+function getDbLastFullSync(dbPath: string): Date | null {
+    return getDbMetaDate(dbPath, 'last_full_sync');
+}
+function getDbLastIncrementalSync(dbPath: string): Date | null {
+    return getDbMetaDate(dbPath, 'last_incremental_sync');
 }
 
 /**
@@ -533,6 +562,8 @@ function updateFreshnessStatus(
     asOf: Date | null,
     fullEntry: ExtractEntry,
     lastSync: Date | null,
+    lastFullSync: Date | null = null,
+    lastIncrementalSync: Date | null = null,
 ): void {
     const remoteAsOf = fullEntry.LastMdified;
     const dataAsOf = asOf?.toISOString();
@@ -545,12 +576,20 @@ function updateFreshnessStatus(
         remoteAsOf,
         ...(behindByHours !== undefined ? { behindByHours } : {}),
         ...(lastSync !== null ? { lastSyncAt: lastSync.toISOString() } : {}),
+        ...(lastFullSync !== null ? { lastFullSyncAt: lastFullSync.toISOString() } : {}),
+        ...(lastIncrementalSync !== null ? { lastIncrementalSyncAt: lastIncrementalSync.toISOString() } : {}),
     };
 }
 
 function refreshFreshnessAfter(dbPath: string, newAsOf: string, fullEntry: ExtractEntry): void {
     const asOfDate = parseRemoteTimestamp(newAsOf);
-    updateFreshnessStatus(asOfDate, fullEntry, getDbLastSync(dbPath));
+    updateFreshnessStatus(
+        asOfDate,
+        fullEntry,
+        getDbLastSync(dbPath),
+        getDbLastFullSync(dbPath),
+        getDbLastIncrementalSync(dbPath),
+    );
 }
 
 /**
@@ -586,7 +625,13 @@ export async function sync(
     }
 
     const asOf = getDbAsOf(config.dbPath);
-    updateFreshnessStatus(asOf, fullEntry, getDbLastSync(config.dbPath));
+    updateFreshnessStatus(
+        asOf,
+        fullEntry,
+        getDbLastSync(config.dbPath),
+        getDbLastFullSync(config.dbPath),
+        getDbLastIncrementalSync(config.dbPath),
+    );
 
     const action = decideSyncAction(asOf, manifest, mode, lastSync, new Date());
 
@@ -647,8 +692,10 @@ export async function sync(
                 const newAsOf = action.entries.at(-1)!.LastMdified;
                 const db = new Database(config.dbPath);
                 try {
+                    const incSyncStamp = new Date().toISOString();
                     db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', newAsOf);
-                    db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', new Date().toISOString());
+                    db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_sync', incSyncStamp);
+                    db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('last_incremental_sync', incSyncStamp);
                 } finally {
                     db.close();
                 }
@@ -735,9 +782,24 @@ export async function importCsv(
         }
     });
 
+    // Pre-compute the table's actual column set so we can tolerate ACMA schema
+    // drift (e.g. new columns in the CSV that don't exist in our DDL yet).
+    // SQLite identifiers are case-insensitive; compare lowercased.
+    const schemaColLc = new Set(
+        (db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>)
+            .map(c => c.name.toLowerCase())
+    );
+
     for await (const record of parser) {
         if (!insert) {
-            columns = Object.keys(record as object);
+            const csvCols = Object.keys(record as object);
+            columns = csvCols.filter(c => schemaColLc.has(c.toLowerCase()));
+            const dropped = csvCols.filter(c => !schemaColLc.has(c.toLowerCase()));
+            if (dropped.length > 0) {
+                console.error(
+                    `[SYNC] ${tableName}: skipping ${dropped.length} unknown CSV column(s): ${dropped.join(', ')}`
+                );
+            }
             const placeholders = columns.map(() => '?').join(',');
             const sql = `INSERT INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`;
             insert = db.prepare(sql);
