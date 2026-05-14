@@ -155,4 +155,55 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
 
         await transport.close();
     }, 45000);
+
+    test('describe_tool returns the full markdown for a registered tool', async () => {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+
+        const result = await client.callTool({ name: 'describe_tool', arguments: { name: 'search_licences' } }) as any;
+        const response = result.content[0].text as string;
+        // The full description must contain section headers absent from the slim catalog summary
+        expect(response).toMatch(/PRIMARY SEARCH TOOL/);
+        expect(response).toMatch(/## Usage/);
+
+        await transport.close();
+    }, 15000);
+
+    test('describe_tool returns error for unknown tool', async () => {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+
+        const result = await client.callTool({ name: 'describe_tool', arguments: { name: 'nonexistent_tool' } }) as any;
+        const response = (result.content[0].text as string).toLowerCase();
+        expect(response).toMatch(/unknown|not found/);
+
+        await transport.close();
+    }, 15000);
+
+    test('tools/list catalog descriptions are slim summaries (under 200 chars)', async () => {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+
+        const tools = await client.listTools();
+        for (const tool of tools.tools) {
+            expect(tool.description!.length).toBeLessThan(200);
+        }
+
+        await transport.close();
+    }, 15000);
+
+    test('tools/list includes describe_tool as the 14th tool', async () => {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+
+        const tools = await client.listTools();
+        expect(tools.tools.some(t => t.name === 'describe_tool')).toBe(true);
+        expect(tools.tools.length).toBe(14);
+
+        await transport.close();
+    }, 15000);
 });
