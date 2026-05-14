@@ -94,7 +94,10 @@ Environment variables:
 |----------|---------|
 | `ACMA_DB_PATH` | Absolute path to the SQLite DB. Default `./data/acma.db`. |
 | `PORT` | HTTP server port for the Streamable HTTP transport. Default `3000`. |
-| `DEBUG_NETWORK` | `true` → log all network traffic during sync. |
+| `LOG_LEVEL` | One of `error` / `warn` / `info` (default) / `debug`. Lower levels are emitted; everything else is suppressed. |
+| `DEBUG_NETWORK` | Legacy alias for `LOG_LEVEL=debug` (kept for backwards compatibility). Promotes per-request `[NETWORK]` logging when set. |
+
+The server's `/health` endpoint returns JSON with sync provenance (`dataAsOf`, `lastSyncAt`, `remoteAsOf`, `behindByHours`, `isSyncing`). Pass `?deep=1` to additionally probe the DB read-only — returns `500` with `status: degraded` if the DB is unreachable.
 
 ### MCP client configuration
 

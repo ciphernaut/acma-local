@@ -32,6 +32,7 @@ import {
 import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery } from './sql.js';
 import { generateKml } from './kml.js';
 import { lookupFrequencyAllocation } from './spectrum_plan.js';
+import { log } from './logger.js';
 
 const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
 const PORT = process.env.PORT || 3000;
@@ -735,7 +736,7 @@ function createServer(): Server {
             if (!wasSyncing) {
                 // Kick off async; intentionally not awaited so this response is fast.
                 sync(DEFAULT_CONFIG, mode).catch((e: unknown) => {
-                    console.error('[MCP] sync_data background failure:', e);
+                    log.error('[MCP] sync_data background failure:', e);
                 });
                 launched = true;
             }
@@ -932,12 +933,42 @@ async function main() {
     const app = express();
     app.use(express.json());
 
-    app.get('/health', (_req, res) => res.send('OK'));
+    // Liveness/readiness probe.
+    //   GET /health           → fast: returns sync provenance only; never opens the DB
+    //   GET /health?deep=1    → readiness: also opens the DB read-only and runs a
+    //                           SELECT COUNT(*) on the meta table; 500 if it fails
+    app.get('/health', (req, res) => {
+        const status = getSyncStatus();
+        const body: Record<string, unknown> = {
+            status: 'ok',
+            version: '1.8.0',
+            ...(status.dataAsOf !== undefined ? { dataAsOf: status.dataAsOf } : {}),
+            ...(status.lastSyncAt !== undefined ? { lastSyncAt: status.lastSyncAt } : {}),
+            ...(status.remoteAsOf !== undefined ? { remoteAsOf: status.remoteAsOf } : {}),
+            ...(status.behindByHours !== undefined ? { behindByHours: status.behindByHours } : {}),
+            isSyncing: status.isSyncing,
+        };
+        if (req.query.deep === '1') {
+            try {
+                const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+                try {
+                    db.prepare('SELECT COUNT(*) AS n FROM meta').get();
+                    body.db = 'reachable';
+                } finally {
+                    if (db.open) db.close();
+                }
+            } catch (e) {
+                body.status = 'degraded';
+                body.db = 'unreachable';
+                body.dbError = (e as Error).message;
+                return res.status(500).json(body);
+            }
+        }
+        res.json(body);
+    });
 
     app.all('/mcp', async (req, res) => {
-        if (process.env.DEBUG_NETWORK) {
-            console.error(`[NETWORK] ${req.method} | session=${req.headers['mcp-session-id'] ?? 'none'}`);
-        }
+        log.debug(`[NETWORK] ${req.method} | session=${req.headers['mcp-session-id'] ?? 'none'}`);
 
         const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
@@ -946,7 +977,7 @@ async function main() {
             try {
                 await transports.get(sessionId)!.handleRequest(req, res, req.body);
             } catch (err: any) {
-                console.error('[MCP] Transport error:', err.message);
+                log.error('[MCP] Transport error:', err.message);
                 if (!res.headersSent) res.status(500).json({ error: err.message });
             }
             return;
@@ -958,14 +989,14 @@ async function main() {
                 sessionIdGenerator: () => randomUUID(),
                 onsessioninitialized: (newId) => {
                     transports.set(newId, transport);
-                    console.error(`[SESSION] Opened: ${newId}`);
+                    log.info(`[SESSION] Opened: ${newId}`);
                 },
             });
 
             transport.onclose = () => {
                 if (transport.sessionId) {
                     transports.delete(transport.sessionId);
-                    console.error(`[SESSION] Closed: ${transport.sessionId}`);
+                    log.info(`[SESSION] Closed: ${transport.sessionId}`);
                 }
             };
 
@@ -974,7 +1005,7 @@ async function main() {
             try {
                 await transport.handleRequest(req, res, req.body);
             } catch (err: any) {
-                console.error('[MCP] Init error:', err.message);
+                log.error('[MCP] Init error:', err.message);
                 if (!res.headersSent) res.status(500).json({ error: err.message });
             }
             return;
@@ -987,33 +1018,33 @@ async function main() {
 
     const port = Number(PORT);
     const httpServer = app.listen(port, '0.0.0.0', () => {
-        console.error(`ACMA RRL MCP Server v1.8.0 running on port ${port} at http://localhost:${port}/mcp`);
-        console.error('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query');
+        log.info(`ACMA RRL MCP Server v1.8.0 running on port ${port} at http://localhost:${port}/mcp`);
+        log.info('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query');
     });
 
     // Graceful shutdown on SIGTERM (systemd / docker stop) and SIGINT (Ctrl-C).
     // Closes MCP transports, stops accepting new connections, finishes in-flight
     // requests, then exits. A 30s watchdog hard-exits if any handle is stuck.
     const shutdown = (signal: string) => {
-        console.error(`[SHUTDOWN] Received ${signal}; closing ${transports.size} MCP transport(s) and HTTP server.`);
+        log.info(`[SHUTDOWN] Received ${signal}; closing ${transports.size} MCP transport(s) and HTTP server.`);
         for (const [sessionId, transport] of transports.entries()) {
             try {
                 transport.close();
             } catch (e) {
-                console.error(`[SHUTDOWN] Error closing transport ${sessionId}: ${(e as Error).message}`);
+                log.error(`[SHUTDOWN] Error closing transport ${sessionId}: ${(e as Error).message}`);
             }
         }
         transports.clear();
         httpServer.close((err) => {
             if (err) {
-                console.error(`[SHUTDOWN] HTTP server close error: ${err.message}`);
+                log.error(`[SHUTDOWN] HTTP server close error: ${err.message}`);
                 process.exit(1);
             }
-            console.error('[SHUTDOWN] Closed cleanly.');
+            log.info('[SHUTDOWN] Closed cleanly.');
             process.exit(0);
         });
         setTimeout(() => {
-            console.error('[SHUTDOWN] Watchdog: forcing exit after 30s grace period.');
+            log.warn('[SHUTDOWN] Watchdog: forcing exit after 30s grace period.');
             process.exit(1);
         }, 30_000).unref();
     };
@@ -1026,7 +1057,7 @@ async function main() {
 // Mirrors the pattern in src/sync.ts.
 if (process.argv[1]?.endsWith('index.ts') || process.argv[1]?.endsWith('index.js')) {
     main().catch(err => {
-        console.error('Fatal error:', err);
+        log.error('Fatal error:', err);
         process.exit(1);
     });
 }

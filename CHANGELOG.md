@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`LOG_LEVEL` env var** (`error` / `warn` / `info` (default) / `debug`). All in-source logging goes through `src/logger.ts`; lower levels suppress noisier ones. `DEBUG_NETWORK` kept as a legacy alias.
+- **Richer `/health` endpoint** — now returns JSON with `status`, `version`, `dataAsOf`, `lastSyncAt`, `remoteAsOf`, `behindByHours`, `isSyncing`. Optional `?deep=1` parameter opens the DB read-only and runs a probe SELECT; responds 500 / `status: degraded` if the DB is unreachable.
+- Logger has its own test suite (`tests/logger.test.ts`, 4 cases).
+
+### Changed
+- ~40 `console.error('[X] ...')` call sites across `src/sync.ts`, `src/spectrum_plan.ts`, `src/index.ts`, and `src/import_spectrum_plan.ts` rewritten to `log.info` / `log.warn` / `log.error`. Message text and `[CHANNEL]` prefixes preserved so existing `grep` muscle memory still works.
+- `DEBUG_NETWORK=true` no longer needs a special check at the call site — it now flows through the logger's level threshold.
+
 ## [1.8.0] - 2026-05-14
 
 ### Added

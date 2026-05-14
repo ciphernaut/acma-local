@@ -9,6 +9,7 @@ import { pipeline } from 'stream/promises';
 import { fileURLToPath } from 'url';
 import { initializeDatabase, TABLE_METADATA } from './db.js';
 import { bootstrapSpectrumPlan } from './spectrum_plan.js';
+import { log } from './logger.js';
 
 export interface SyncConfig {
     extractsUrl: string;
@@ -243,7 +244,7 @@ function applyCsvDiff(csvBuffer: Buffer, tableName: string, db: Database.Databas
     const dataCols = csvDataCols.filter(c => schemaColLc.has(c.toLowerCase()));
     const droppedCols = csvDataCols.filter(c => !schemaColLc.has(c.toLowerCase()));
     if (droppedCols.length > 0) {
-        console.error(
+        log.warn(
             `[SYNC] ${tableName}: skipping ${droppedCols.length} unknown change-zip column(s): ${droppedCols.join(', ')}`
         );
     }
@@ -300,7 +301,7 @@ function applyCsvDiff(csvBuffer: Buffer, tableName: string, db: Database.Databas
                     );
                 }
             } else {
-                console.error(`Unknown CHANGE='${change}' in ${tableName}; skipping row pk=${JSON.stringify(pkValues)}`);
+                log.warn(`Unknown CHANGE='${change}' in ${tableName}; skipping row pk=${JSON.stringify(pkValues)}`);
             }
         }
     });
@@ -422,27 +423,27 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         const inputZipStale = inputZipExists && isInputZipStale(zipPathFromInput, remoteTimestamp);
 
         if (inputZipExists && !inputZipStale) {
-            console.error('Using local dataset from inputs/');
+            log.info('Using local dataset from inputs/');
             fs.copyFileSync(zipPathFromInput, zipPath);
         } else {
             if (inputZipStale) {
                 const mtime = fs.statSync(zipPathFromInput).mtime.toISOString();
-                console.error(`[SYNC] Input zip mtime=${mtime} is older than remote=${remoteTimestamp.toISOString()}; ignoring stale input.`);
+                log.warn(`[SYNC] Input zip mtime=${mtime} is older than remote=${remoteTimestamp.toISOString()}; ignoring stale input.`);
             }
-            console.error(`Downloading full dataset from ${spectra.FileUrl}...`);
+            log.info(`Downloading full dataset from ${spectra.FileUrl}...`);
             await downloadFile(spectra.FileUrl, zipPath);
         }
 
         currentSyncStatus.progress = 20;
 
-        console.error('Extracting ZIP...');
+        log.info('Extracting ZIP...');
         const extractDir = path.join(config.dataDir, 'extracted');
         if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
         const files = await extractZip(zipPath, extractDir);
 
         currentSyncStatus.progress = 30;
 
-        console.error('Initializing database...');
+        log.info('Initializing database...');
         initializeDatabase(config.dbPath);
 
         const tablesToImport = files.filter(file => {
@@ -459,7 +460,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
             currentSyncStatus.currentTable = targetTable;
             const tableProgressBase = 30 + (i / tablesToImport.length) * 65;
 
-            console.error(`Importing ${fileName}...`);
+            log.info(`Importing ${fileName}...`);
             // Import-loop maps to the 30..95 range (65 points total), divided evenly
             // across `tablesToImport.length` files. Within each file's slice, `p`
             // (0..100 from importCsv) advances progress by `sliceSize` points.
@@ -471,7 +472,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
 
         // Rebuild the FTS5 index over the freshly-imported applic_text_block rows.
         // External-content FTS5 requires an explicit rebuild after bulk import.
-        console.error('Rebuilding FTS5 index over applic_text_block...');
+        log.info('Rebuilding FTS5 index over applic_text_block...');
         const ftsDb = new Database(config.dbPath);
         try {
             ftsDb.exec(`INSERT INTO applic_text_block_fts(applic_text_block_fts) VALUES('rebuild');`);
@@ -481,7 +482,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
 
         // Refresh query planner statistics. ANALYZE on the 22-table corpus
         // completes in a few seconds; cheap insurance for downstream queries.
-        console.error('Running ANALYZE for query planner...');
+        log.info('Running ANALYZE for query planner...');
         const anDb = new Database(config.dbPath);
         try {
             anDb.exec('ANALYZE;');
@@ -512,7 +513,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         }
 
         currentSyncStatus.progress = 100;
-        console.error('Full sync complete.');
+        log.info('Full sync complete.');
     } catch (error: any) {
         currentSyncStatus.lastError = error.message;
         throw error;
@@ -626,14 +627,14 @@ export async function sync(
         const reason: SyncReason = msg.includes('unexpected response shape')
             ? 'manifest-invalid'
             : 'manifest-fetch-failed';
-        console.error(`[SYNC] Manifest ${reason}: ${msg}`);
+        log.error(`[SYNC] Manifest ${reason}: ${msg}`);
         recordDecision(reason, undefined, msg);
         return;
     }
 
     const fullEntry = manifest.find(e => e.IsFullExtract);
     if (!fullEntry) {
-        console.error('[SYNC] Manifest has no full extract entry; aborting.');
+        log.error('[SYNC] Manifest has no full extract entry; aborting.');
         recordDecision('manifest-invalid', undefined, 'no full entry in manifest');
         return;
     }
@@ -656,7 +657,7 @@ export async function sync(
 
         case 'gap-exceeded': {
             const detail = `${action.behindHours}h behind manifest window — run sync_data mode=full to recover`;
-            console.error(`[SYNC] ${detail}`);
+            log.warn(`[SYNC] ${detail}`);
             recordDecision('gap-exceeded', undefined, detail);
             return;
         }
@@ -697,9 +698,9 @@ export async function sync(
                         throw new Error(`Suspicious FileName in manifest: ${item.FileName}`);
                     }
                     const zipPath = path.join(changesDir, safeName);
-                    console.error(`[SYNC] Downloading ${item.FileUrl}...`);
+                    log.info(`[SYNC] Downloading ${item.FileUrl}...`);
                     await downloadFile(item.FileUrl, zipPath);
-                    console.error(`[SYNC] Applying ${safeName}...`);
+                    log.info(`[SYNC] Applying ${safeName}...`);
                     await applyCsvDiffZip(zipPath, config.dbPath);
                 }
 
@@ -722,7 +723,7 @@ export async function sync(
                 );
             } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
-                console.error('[SYNC] Incremental sync failed.', e);
+                log.error('[SYNC] Incremental sync failed.', e);
                 recordDecision('incremental-failed', 'incremental', msg);
             } finally {
                 currentSyncStatus.isSyncing = false;
@@ -734,7 +735,7 @@ export async function sync(
 
 // Run if called directly
 if (process.argv[1]?.endsWith('sync.ts') || process.argv[1]?.endsWith('sync.js')) {
-    sync().catch(console.error);
+    sync().catch(e => log.error(e));
 }
 
 /**
@@ -810,7 +811,7 @@ export async function importCsv(
             columns = csvCols.filter(c => schemaColLc.has(c.toLowerCase()));
             const dropped = csvCols.filter(c => !schemaColLc.has(c.toLowerCase()));
             if (dropped.length > 0) {
-                console.error(
+                log.warn(
                     `[SYNC] ${tableName}: skipping ${dropped.length} unknown CSV column(s): ${dropped.join(', ')}`
                 );
             }

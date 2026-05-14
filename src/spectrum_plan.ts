@@ -8,6 +8,7 @@ import type { Database as BetterSqlite3Database } from 'better-sqlite3';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
+import { log } from './logger.js';
 
 const UNIT_MULTIPLIER: Record<string, number> = {
     'Hz': 1,
@@ -137,7 +138,7 @@ export function applyReseed(db: BetterSqlite3Database, sourcePath: string): void
             .run('row_counts', JSON.stringify(counts));
 
         db.exec(`RELEASE SAVEPOINT ${savepoint}`);
-        console.error(`[SPECTRUM] Reseeded: ${counts.allocations} allocations, ${counts.au_footnotes} AU footnotes, ${counts.intl_footnotes} intl footnotes`);
+        log.info(`[SPECTRUM] Reseeded: ${counts.allocations} allocations, ${counts.au_footnotes} AU footnotes, ${counts.intl_footnotes} intl footnotes`);
     } catch (e) {
         db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
         throw e;
@@ -165,7 +166,7 @@ export function dumpSpectrumPlan(db: BetterSqlite3Database, outPath: string): vo
 
     lines.push('COMMIT;');
     fs.writeFileSync(outPath, lines.join('\n') + '\n');
-    console.error(`[SPECTRUM] Wrote ${outPath} (${lines.length - 2} INSERT statements)`);
+    log.info(`[SPECTRUM] Wrote ${outPath} (${lines.length - 2} INSERT statements)`);
 }
 
 function sqlLiteral(v: unknown): string {
@@ -209,14 +210,14 @@ function copyFromSourceDb(db: BetterSqlite3Database, sourcePath: string): void {
         db.transaction(() => {
             for (const row of allocs) {
                 if (!row.frequency_range || !row.unit) {
-                    console.error(`[SPECTRUM] skip row (missing range or unit): range="${row.frequency_range}" unit="${row.unit}"`);
+                    log.warn(`[SPECTRUM] skip row (missing range or unit): range="${row.frequency_range}" unit="${row.unit}"`);
                     continue;
                 }
                 let bounds: { freq_start_hz: number; freq_end_hz: number };
                 try {
                     bounds = parseFrequencyRange(row.frequency_range, row.unit);
                 } catch (e) {
-                    console.error(`[SPECTRUM] skip row (parse failure): "${row.frequency_range}" ${row.unit} — ${(e as Error).message}`);
+                    log.warn(`[SPECTRUM] skip row (parse failure): "${row.frequency_range}" ${row.unit} — ${(e as Error).message}`);
                     continue;
                 }
                 insertAlloc.run(
@@ -255,14 +256,14 @@ export function bootstrapSpectrumPlan(db: BetterSqlite3Database, seedPath: strin
         return;
     }
     if (!fs.existsSync(seedPath)) {
-        console.error(`[SPECTRUM] Bootstrap skipped: no seed at ${seedPath}`);
+        log.warn(`[SPECTRUM] Bootstrap skipped: no seed at ${seedPath}`);
         return;
     }
     try {
-        console.error(`[SPECTRUM] Bootstrapping spectrum tables from ${seedPath}`);
+        log.info(`[SPECTRUM] Bootstrapping spectrum tables from ${seedPath}`);
         applyReseed(db, seedPath);
     } catch (e) {
-        console.error(`[SPECTRUM] Bootstrap failed: ${(e as Error).message}. Spectrum tables remain empty.`);
+        log.error(`[SPECTRUM] Bootstrap failed: ${(e as Error).message}. Spectrum tables remain empty.`);
     }
 }
 
@@ -396,11 +397,11 @@ export function applyPatch(db: BetterSqlite3Database, patchPath: string): void {
     const after = (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n;
 
     if (before > 0 && after < before / 2) {
-        console.error(`[SPECTRUM] WARNING: patch reduced allocations from ${before} to ${after} (>50% deletion).`);
+        log.warn(`[SPECTRUM] WARNING: patch reduced allocations from ${before} to ${after} (>50% deletion).`);
     }
 
     const today = new Date().toISOString().slice(0, 10);
     db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)').run('last_patch_date', today);
 
-    console.error(`[SPECTRUM] Applied patch ${patchPath} (allocations ${before} -> ${after})`);
+    log.info(`[SPECTRUM] Applied patch ${patchPath} (allocations ${before} -> ${after})`);
 }

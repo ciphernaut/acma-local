@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import { initializeDatabase } from './db.js';
 import { applyReseed, applyPatch, dumpSpectrumPlan } from './spectrum_plan.js';
 import { DEFAULT_CONFIG } from './sync.js';
+import { log } from './logger.js';
 
 const DEFAULT_SEED_PATH = path.resolve('seed/spectrum_plan.sql');
 
@@ -40,7 +41,7 @@ function main() {
     // tables that landed in later code versions (e.g. spectrum_* added after
     // the DB was first synced under an older schema).
     if (!fs.existsSync(dbPath)) {
-        console.error(`Initialising new DB at ${dbPath}`);
+        log.info(`Initialising new DB at ${dbPath}`);
     }
     initializeDatabase(dbPath);
 

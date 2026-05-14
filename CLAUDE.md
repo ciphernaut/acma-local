@@ -86,5 +86,6 @@ Runtime introspection: call the `describe_schema` MCP tool (or `describeSchema()
 |----------|---------|
 | `PORT` | HTTP server port (default 3000). |
 | `ACMA_DB_PATH` | Absolute path to the SQLite DB. Defaults to `./data/acma.db`. |
-| `DEBUG_NETWORK` | `true` → log all network traffic. |
+| `LOG_LEVEL` | `error` / `warn` / `info` (default) / `debug`. Routed via `src/logger.ts`. |
+| `DEBUG_NETWORK` | Legacy alias — when set, promotes `LOG_LEVEL` to `debug`. Kept working for backwards compatibility. |
 | `DEBUG_AUTH` | `true` → log auth-stub authorizations (auth is currently a placeholder; see `docs/AUTH-REWORK.md`). |
