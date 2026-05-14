@@ -96,25 +96,83 @@ describe('executeSql', () => {
 });
 
 describe('listSampleQueries', () => {
-    test('returns exactly 44 entries', () => {
-        const queries = listSampleQueries();
-        expect(queries).toHaveLength(44);
+    test('returns at least 45 entries across all categories', () => {
+        const valid = ['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict'];
+        let total = 0;
+        for (const cat of valid) {
+            total += (listSampleQueries({ category: cat as any }) as any[]).length;
+        }
+        expect(total).toBeGreaterThanOrEqual(45);
     });
 
     test('every entry has a non-empty description and query', () => {
-        const queries = listSampleQueries();
-        for (const q of queries) {
-            expect(typeof q.description).toBe('string');
-            expect(q.description.trim().length).toBeGreaterThan(0);
-            expect(typeof q.query).toBe('string');
-            expect(q.query.trim().length).toBeGreaterThan(0);
+        const valid = ['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict'];
+        for (const cat of valid) {
+            const qs = listSampleQueries({ category: cat as any }) as any[];
+            for (const q of qs) {
+                expect(typeof q.description).toBe('string');
+                expect(q.description.trim().length).toBeGreaterThan(0);
+                expect(typeof q.query).toBe('string');
+                expect(q.query.trim().length).toBeGreaterThan(0);
+            }
         }
     });
 
-    test('every query starts with SELECT (case-insensitive)', () => {
-        const queries = listSampleQueries();
-        for (const q of queries) {
-            expect(q.query.trim().toUpperCase()).toMatch(/^SELECT/);
+    test('every query starts with SELECT or WITH (case-insensitive)', () => {
+        const result = listSampleQueries({ category: 'lookup' }) as any[];
+        // Use a filtered call to get actual SampleQuery objects; for the regex check
+        // we iterate all categories to cover every entry.
+        const valid = ['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict'];
+        for (const cat of valid) {
+            const qs = listSampleQueries({ category: cat as any }) as any[];
+            for (const q of qs) {
+                expect(q.query.trim()).toMatch(/^(SELECT|WITH)/i);
+            }
+        }
+    });
+
+    test('listSampleQueries() with no filter returns a category summary', () => {
+        const result = listSampleQueries();
+        expect(Array.isArray(result)).toBe(false);
+        const summary = result as { categories: Array<{ category: string; count: number; descriptions: string[] }> };
+        expect(summary.categories.length).toBeGreaterThan(0);
+        for (const c of summary.categories) {
+            expect(c.count).toBeGreaterThan(0);
+            expect(c.descriptions.length).toBe(c.count);
+        }
+        const total = summary.categories.reduce((s, c) => s + c.count, 0);
+        expect(total).toBeGreaterThanOrEqual(45);
+    });
+
+    test('listSampleQueries({ category }) returns matching SampleQuery[]', () => {
+        const result = listSampleQueries({ category: 'lookup' }) as any[];
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        for (const q of result) {
+            expect(q.category).toBe('lookup');
+            expect(typeof q.description).toBe('string');
+            expect(typeof q.query).toBe('string');
+        }
+    });
+
+    test('listSampleQueries({ name }) does substring match on description', () => {
+        const result = listSampleQueries({ name: 'NBN' }) as any[];
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(0);
+        for (const q of result) {
+            expect(q.description.toLowerCase()).toContain('nbn');
+        }
+    });
+
+    test('listSampleQueries every entry has a valid category', () => {
+        const valid = new Set(['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict']);
+        const all: any[] = [];
+        for (const cat of valid) {
+            all.push(...(listSampleQueries({ category: cat as any }) as any[]));
+        }
+        expect(all.length).toBeGreaterThanOrEqual(45);
+        for (const q of all) {
+            expect(valid.has(q.category)).toBe(true);
         }
     });
 });

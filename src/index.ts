@@ -291,18 +291,21 @@ Download and import the latest ACMA RRL changes. Safe to call while server is ru
             },
             {
                 name: 'list_sample_queries',
-                description: `
-### [SQL Sample Queries]
-Returns 44 named example SQL queries from the ACMA RRL database.
-
-## Usage
-- Call this first to discover what SQL queries are available
-- Use the returned queries as templates or run them directly with execute_sql
-- Covers: licence counts, assignments by frequency/postcode, site/client searches, licensing statistics, satellite data and more
-
-## Output
-Array of { description, query } objects`,
-                inputSchema: { type: 'object', properties: {} },
+                description: '[SQL] List sample queries. Call bare for a category index, then filter by category/name for details.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        category: {
+                            type: 'string',
+                            enum: ['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict'],
+                            description: 'Filter to one category',
+                        },
+                        name: {
+                            type: 'string',
+                            description: 'Substring match on description',
+                        },
+                    },
+                },
             },
             {
                 name: 'describe_schema',
@@ -546,8 +549,11 @@ Generate a KML file from cached query results.
         }
 
         if (name === 'list_sample_queries') {
-            const queries = listSampleQueries();
-            return { content: [{ type: 'text', text: JSON.stringify(queries, null, 2) }] };
+            const filter: { category?: any; name?: string } = {};
+            if (args?.category !== undefined) filter.category = args.category as any;
+            if (args?.name !== undefined) filter.name = args.name as string;
+            const result = listSampleQueries(Object.keys(filter).length > 0 ? filter : undefined);
+            return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
         if (name === 'describe_schema') {

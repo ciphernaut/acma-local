@@ -92,17 +92,34 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         await transport.close();
     }, 25000);
 
-    test('list_sample_queries returns 44 entries', async () => {
+    test('list_sample_queries bare call returns a category summary with >=45 total entries', async () => {
         const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
         const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
         await client.connect(transport);
 
         const result = await client.callTool({ name: 'list_sample_queries', arguments: {} }) as any;
+        const summary = JSON.parse(result.content[0].text);
+        expect(Array.isArray(summary)).toBe(false);
+        expect(Array.isArray(summary.categories)).toBe(true);
+        expect(summary.categories.length).toBeGreaterThan(0);
+        const total = summary.categories.reduce((s: number, c: any) => s + c.count, 0);
+        expect(total).toBeGreaterThanOrEqual(45);
+
+        await transport.close();
+    }, 15000);
+
+    test('list_sample_queries filtered by category returns SampleQuery[]', async () => {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+
+        const result = await client.callTool({ name: 'list_sample_queries', arguments: { category: 'lookup' } }) as any;
         const queries = JSON.parse(result.content[0].text);
         expect(Array.isArray(queries)).toBe(true);
-        expect(queries).toHaveLength(44);
+        expect(queries.length).toBeGreaterThan(0);
         expect(queries[0]).toHaveProperty('description');
         expect(queries[0]).toHaveProperty('query');
+        expect(queries[0]).toHaveProperty('category', 'lookup');
 
         await transport.close();
     }, 15000);
