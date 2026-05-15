@@ -11,7 +11,7 @@ from footnotes import parse_footnote_block, is_running_header
         ("Part 3   Australian Footnotes", True),
         ("107", True),                                # bare page number
         ("AUS1A", False),                             # real footnote start
-        ("53", False),                                # real footnote start (intl)
+        ("53 Use of frequency band is limited.", False),  # intl ref — ref + text on same line
         ("Some footnote body text", False),
     ],
 )
