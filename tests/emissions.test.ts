@@ -140,7 +140,7 @@ describe('decodeEmissionDesignator', () => {
     });
 });
 
-import { dumpSeedFromCodeTables, bootstrapEmissionTables, applyEmissionReseed } from '../src/emissions.js';
+import { dumpSeedFromCodeTables, bootstrapEmissionTables, applyEmissionReseed, resolveEmissionCode } from '../src/emissions.js';
 import { initializeDatabase } from '../src/db.js';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
@@ -251,5 +251,69 @@ describe('seed generation + bootstrap', () => {
             const bad = db.prepare("SELECT code FROM emission_modulation WHERE code = 'BAD'").get();
             expect(bad).toBeUndefined();
         } finally { db.close(); }
+    });
+});
+
+describe('resolveEmissionCode', () => {
+    let dbPath: string;
+    let db: Database.Database;
+    let tmpDir: string;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emissions-resolve-'));
+        dbPath = path.join(tmpDir, 'test.db');
+        initializeDatabase(dbPath);
+        const seedPath = path.join(tmpDir, 'emissions.sql');
+        dumpSeedFromCodeTables(seedPath);
+        db = new Database(dbPath);
+        applyEmissionReseed(db, seedPath);
+    });
+    afterEach(() => {
+        db.close();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    test('single-letter exact match (modulation F)', () => {
+        const r = resolveEmissionCode(db, 'modulation', 'F');
+        expect(r.kind).toBe('ok');
+        if (r.kind === 'ok') expect(r.code).toBe('F');
+    });
+
+    test('single-letter unknown (modulation Z)', () => {
+        const r = resolveEmissionCode(db, 'modulation', 'Z');
+        expect(r.kind).toBe('unknown');
+    });
+
+    test('description substring unambiguous: "facsimile" → C', () => {
+        const r = resolveEmissionCode(db, 'info_type', 'facsimile');
+        expect(r.kind).toBe('ok');
+        if (r.kind === 'ok') expect(r.code).toBe('C');
+    });
+
+    test('description substring case-insensitive', () => {
+        const r = resolveEmissionCode(db, 'info_type', 'FACSIMILE');
+        expect(r.kind).toBe('ok');
+        if (r.kind === 'ok') expect(r.code).toBe('C');
+    });
+
+    test('description substring ambiguous: "sideband" → multiple', () => {
+        const r = resolveEmissionCode(db, 'modulation', 'sideband');
+        expect(r.kind).toBe('ambiguous');
+        if (r.kind === 'ambiguous') {
+            const codes = r.candidates.map(c => c.code).sort();
+            // SSB variants: H, R, J + double-sideband A + independent-sideband B + vestigial-sideband C
+            expect(codes).toEqual(['A', 'B', 'C', 'H', 'J', 'R']);
+        }
+    });
+
+    test('description substring no match', () => {
+        const r = resolveEmissionCode(db, 'modulation', 'quantum-bogon');
+        expect(r.kind).toBe('not_found');
+    });
+
+    test('description "reduced" → R (single match)', () => {
+        const r = resolveEmissionCode(db, 'modulation', 'reduced');
+        expect(r.kind).toBe('ok');
+        if (r.kind === 'ok') expect(r.code).toBe('R');
     });
 });

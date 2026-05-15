@@ -328,6 +328,55 @@ export function applyEmissionReseed(db: BetterSqlite3Database, seedPath: string)
     }
 }
 
+const FIELD_TO_TABLE: Record<EmissionField, string> = {
+    modulation: 'emission_modulation',
+    signal_nature: 'emission_signal_nature',
+    info_type: 'emission_info_type',
+    signal_detail: 'emission_signal_detail',
+    multiplex: 'emission_multiplex',
+};
+
+export type ResolveResult =
+    | { kind: 'ok'; code: string; description: string }
+    | { kind: 'unknown'; input: string }
+    | { kind: 'not_found'; input: string }
+    | { kind: 'ambiguous'; candidates: Array<{ code: string; description: string }> };
+
+/**
+ * Resolve a single user input (either a code letter or a description substring)
+ * to one code letter for the given field. Used by search_devices_by_emission.
+ *
+ *  - Single-char input: looked up directly in CODE_TABLES (DB not needed).
+ *    Returns 'ok' on hit, 'unknown' on miss.
+ *  - Multi-char input: case-insensitive substring match against the DB
+ *    description column. Returns 'ok' on exactly one match, 'not_found' on
+ *    zero, 'ambiguous' on >1.
+ */
+export function resolveEmissionCode(
+    db: BetterSqlite3Database,
+    field: EmissionField,
+    input: string,
+): ResolveResult {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) return { kind: 'not_found', input };
+
+    if (trimmed.length === 1) {
+        const code = trimmed.toUpperCase();
+        const table = CODE_TABLES[field] as Record<string, { description: string }>;
+        if (table[code]) return { kind: 'ok', code, description: table[code]!.description };
+        return { kind: 'unknown', input };
+    }
+
+    const tableName = FIELD_TO_TABLE[field];
+    const rows = db.prepare(
+        `SELECT code, description FROM ${tableName} WHERE LOWER(description) LIKE ? ORDER BY code`
+    ).all(`%${trimmed.toLowerCase()}%`) as Array<{ code: string; description: string }>;
+
+    if (rows.length === 0) return { kind: 'not_found', input };
+    if (rows.length === 1) return { kind: 'ok', code: rows[0]!.code, description: rows[0]!.description };
+    return { kind: 'ambiguous', candidates: rows };
+}
+
 /**
  * Auto-bootstrap: if ALL five emission tables are empty AND the seed file
  * exists, apply it. Used at the tail of performFullSync so a fresh DB
