@@ -364,6 +364,7 @@ COMMIT;
         expect(payload.rows[0].decoded.info_type_description).toContain('Telephony');
         expect(payload.resolved_filters.modulation.code).toBe('F');
         expect(payload._hints?.length).toBeGreaterThan(0);
+        expect(payload._hints.some((h: any) => h.tool === 'decode_emission_designator' && h.args?.code)).toBe(true);
         await transport.close();
     }, 20000);
 

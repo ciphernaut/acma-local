@@ -201,9 +201,13 @@ export function searchDevicesByEmission(
         });
     }
 
-    return {
-        rows: enriched,
-        truncated: rawTruncated && enriched.length >= cap,
-        resolved_filters: resolved,
-    };
+    // Truncation semantics: if the raw SQL hit the cap+1 sentinel, we know
+    // there are more matching rows than fit. When bandwidth filtering is
+    // active, JS-side rejection may reduce enriched.length below cap, but
+    // we still can't claim the result is complete — there may be matching
+    // rows beyond the fetch window. Err on the side of over-reporting.
+    const hasBandwidthFilter = filters.min_bandwidth_hz !== undefined || filters.max_bandwidth_hz !== undefined;
+    const truncated = rawTruncated && (enriched.length >= cap || hasBandwidthFilter);
+
+    return { rows: enriched, truncated, resolved_filters: resolved };
 }

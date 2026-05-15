@@ -111,6 +111,22 @@ describe('searchDevicesByEmission', () => {
         expect(r.truncated).toBe(false);
     });
 
+    test('truncated is true when bandwidth filter is active and rawTruncated', () => {
+        // limit=1 forces rawTruncated; bandwidth filter is active.
+        // Even if the bandwidth filter removes the one row that was sliced in,
+        // we should still report truncated=true because we don't know about
+        // rows beyond the fetch cap.
+        const r = searchDevicesByEmission(db, {
+            modulation: 'F',
+            min_bandwidth_hz: 15000,
+            max_bandwidth_hz: 20000,
+            limit: 1
+        });
+        // Either we get 1 row (16K0F3E passes bandwidth) and truncated=true,
+        // or 0 rows (depending on which F-row SQL returns first) and truncated=true.
+        expect(r.truncated).toBe(true);
+    });
+
     test('signal_detail filter (9-char form)', () => {
         const r = searchDevicesByEmission(db, { signal_detail: 'E' });
         expect(r.rows.map(x => x.LICENCE_NO)).toEqual(['L007']);

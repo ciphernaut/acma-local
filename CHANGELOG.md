@@ -25,6 +25,9 @@ All notable changes to this project are documented here. Format follows [Keep a 
 ### Changed
 - Tool count 16 → 18; table count 26 → 31.
 
+### Upgrade notes
+- The new `emission_*` tables are auto-populated by the next full sync. To seed them immediately on an existing database without triggering a sync, run `npm run import-emissions`.
+
 ## [1.8.0] - 2026-05-14
 
 ### Added
