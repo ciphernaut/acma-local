@@ -288,10 +288,17 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         const { applyReseed } = await import('../src/spectrum_plan.js');
         const fixture = path.join(__dirname, 'fixtures', 'spectrum_plan_smoke.sql');
         if (!fs.existsSync(path.dirname(fixture))) fs.mkdirSync(path.dirname(fixture), { recursive: true });
+        // New schema: spectrum_allocations(freq_start_hz, freq_end_hz, unit, page, services_json, footnotes_json, raw)
+        // services_json: array of { name, primary, inline_footnotes, qualifier? }
+        // footnotes_json: array of footnote ref strings
         fs.writeFileSync(fixture, `BEGIN TRANSACTION;
-INSERT INTO spectrum_allocations VALUES(87000000, 108000000, '87-108', 'MHz', '', '', 'BROADCASTING', 'BROADCASTING', 'FM broadcast band', '5.87 AUS37');
-INSERT INTO spectrum_australian_footnotes VALUES('AUS37', 'AUS37 body.');
-INSERT INTO spectrum_international_footnotes VALUES('5.87', '5.87 ITU body.');
+INSERT INTO spectrum_allocations(freq_start_hz, freq_end_hz, unit, page, services_json, footnotes_json, raw)
+  VALUES(87000000, 108000000, 'MHz', 42,
+    '[{"name":"BROADCASTING","primary":true,"inline_footnotes":["AUS37"],"qualifier":null}]',
+    '["AUS37","5.87"]',
+    'BROADCASTING AUS37');
+INSERT INTO spectrum_australian_footnotes(footnote_ref, footnote_text) VALUES('AUS37', 'AUS37 body.');
+INSERT INTO spectrum_international_footnotes(footnote_ref, footnote_text) VALUES('5.87', '5.87 ITU body.');
 INSERT INTO spectrum_plan_meta VALUES('source_description', 'Smoke fixture');
 INSERT INTO spectrum_plan_meta VALUES('published_date', '2018-01-01');
 COMMIT;
@@ -304,9 +311,21 @@ COMMIT;
         const response = await callMcpTool('get_frequency_allocation', { freq_hz: 87100000 });
         const parsed = JSON.parse(response);
         expect(parsed.match_count).toBe(1);
-        expect(parsed.allocations[0].australian_table_of_allocations).toBe('BROADCASTING');
-        expect(parsed.allocations[0].footnotes.australian[0].ref).toBe('AUS37');
-        expect(parsed._warning).toMatch(/8 years old|published 2018/);  // staleness warning fires for 2018-01-01
+        // New shape: allocation (singular object) instead of allocations[0]
+        expect(parsed.allocation).toBeDefined();
+        expect(typeof parsed.allocation).toBe('object');
+        expect(parsed.allocation.services[0].name).toBe('BROADCASTING');
+        expect(parsed.allocation.services[0].primary).toBe(true);
+        // regions object with ITU R1/R2/R3 contrast keys
+        expect(parsed.regions).toBeDefined();
+        expect(Object.keys(parsed.regions)).toEqual(expect.arrayContaining(['1', '2', '3']));
+        // resolved_footnotes flat map
+        expect(parsed.resolved_footnotes).toBeDefined();
+        expect(parsed.resolved_footnotes['AUS37']).toBe('AUS37 body.');
+        // match_count is numeric
+        expect(typeof parsed.match_count).toBe('number');
+        // staleness warning fires for 2018-01-01
+        expect(parsed._warning).toMatch(/8 years old|published 2018/);
         expect(parsed._hints).toBeDefined();
         expect(parsed._hints.some((h: any) => h.tool === 'search_licences')).toBe(true);
 

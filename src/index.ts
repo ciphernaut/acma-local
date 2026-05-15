@@ -282,38 +282,101 @@ Returns SQLite's EXPLAIN QUERY PLAN output for a read-only query.
 - sql: A SELECT or WITH ... SELECT statement (same restrictions as execute_sql)`,
     },
     get_frequency_allocation: {
-        summary: 'Look up the Australian Radiofrequency Spectrum Plan allocation for a frequency in Hz. [spectrum]',
+        summary: 'Look up ACMA Spectrum Plan allocation for a frequency (Hz). Returns AU allocation + R1/R2/R3 contrast + resolved footnotes. [capability: lookup]',
         tags: ['lookup', 'spectrum'],
         fullDescription: `
 ### [Spectrum Allocation Lookup]
-Look up the Australian Radiofrequency Spectrum Plan (ARSP) allocation for a given frequency.
-
-## Usage
-- Provide a frequency in Hz (integer). Examples:
-  - 87100000 -> 87.1 MHz (FM broadcast band)
-  - 2400000000 -> 2.4 GHz (ISM band)
-  - 14000000 -> 14 MHz (amateur 20 m band)
+Look up the Australian Radiofrequency Spectrum Plan (ARSP) allocation for a given frequency,
+with ITU Region 1/2/3 contrast and resolved footnote text.
 
 ## Input
-- freq_hz: Frequency in Hz (positive integer).
-- include_footnotes: If true (default), full footnote text is included in resolved_footnotes.
+- \`freq_hz\` — Positive integer or float, in Hz. Examples:
+  - \`87100000\` → 87.1 MHz (FM broadcast band)
+  - \`2400000000\` → 2.4 GHz (ISM band)
+  - \`14000000\` → 14 MHz (amateur 20 m band)
+- \`include_footnotes\` — Boolean, default \`true\`. When false, \`resolved_footnotes\` is omitted (faster).
 
 ## Response shape
-- allocation: The AU row covering the frequency (null if none).
-- match_count: Number of AU rows matched (normally 0 or 1; >1 indicates plan overlap).
-- regions: { 1, 2, 3 } — ITU Region contrast rows (null when no region row exists for that frequency).
-- resolved_footnotes: Flat map of footnote_ref → footnote_text for every ref in allocation + regions (omitted when include_footnotes is false).
-- source: { published_date, last_patch_date } — provenance from spectrum_plan_meta.
 
-Each allocation / region row contains:
-- services[]: { name, primary, inline_footnotes[], qualifier? }
-- footnotes[]: cell-level footnote refs (e.g. "AUS37", "5.87")
-- raw: the original table-cell text
-- region: present only on region rows (1, 2, or 3)
+| Field | Type | Description |
+|-------|------|-------------|
+| \`match_count\` | number | Number of AU allocations covering this frequency. Normally 0 or 1; >1 indicates a plan overlap and triggers a \`_warning\`. |
+| \`allocation\` | object\|null | The AU allocation row covering the frequency, or \`null\` when nothing matches. |
+| \`regions\` | object | ITU R1/R2/R3 contrast. Keys \`"1"\`, \`"2"\`, \`"3"\`; each value is an allocation row or \`null\`. |
+| \`resolved_footnotes\` | object | Flat map of \`footnote_ref → footnote_text\` covering all refs in \`allocation\` + all \`regions\`. Omitted when \`include_footnotes=false\`. |
+| \`source\` | object | \`{ published_date, last_patch_date }\` — provenance from \`spectrum_plan_meta\`. |
+| \`_warning\` | string | Staleness or integrity notice. Present when base data is ≥ 3 years old, no match found, or >1 overlapping rows detected. Absent otherwise. |
+| \`_hints\` | array | Cross-link suggestions. Present when \`match_count > 0\`. |
+
+### Allocation / region row fields
+
+Each \`allocation\` row (and each non-null \`regions[n]\` row) contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| \`freq_start_hz\` | number | Band start in Hz. |
+| \`freq_end_hz\` | number | Band end in Hz (exclusive). |
+| \`unit\` | string | Display unit from the plan table (e.g. \`"MHz"\`). |
+| \`page\` | number | Source page in the ARSP document. |
+| \`services\` | array | Parsed service entries (see below). |
+| \`footnotes\` | string[] | Cell-level footnote refs (e.g. \`["AUS37","5.87"]\`). |
+| \`raw\` | string | Original table-cell text (unparsed). |
+| \`region\` | number | Present only on region rows (1, 2, or 3). Absent on \`allocation\`. |
+
+### Service entry fields
+
+Each \`services[]\` element:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| \`name\` | string | Service name as it appears in the plan (e.g. \`"BROADCASTING"\`). |
+| \`primary\` | boolean | \`true\` when the service is written ALL CAPS in the plan, indicating a primary allocation basis. \`false\` for secondary (mixed case). |
+| \`inline_footnotes\` | string[] | Footnote refs that appeared inline with this service entry. |
+| \`qualifier\` | string | Optional qualifier text (e.g. \`"(Earth-to-space)"\`). Absent when none. |
+
+## Example
+
+**Call:**
+\`\`\`json
+{ "name": "get_frequency_allocation", "arguments": { "freq_hz": 87100000 } }
+\`\`\`
+
+**Response (truncated):**
+\`\`\`json
+{
+  "match_count": 1,
+  "allocation": {
+    "freq_start_hz": 87000000,
+    "freq_end_hz": 108000000,
+    "unit": "MHz",
+    "page": 42,
+    "services": [
+      { "name": "BROADCASTING", "primary": true, "inline_footnotes": ["AUS37"], "qualifier": null }
+    ],
+    "footnotes": ["AUS37", "5.87"],
+    "raw": "BROADCASTING AUS37"
+  },
+  "regions": {
+    "1": { "freq_start_hz": 87500000, "freq_end_hz": 108000000, "services": [...], "region": 1, ... },
+    "2": { "freq_start_hz": 87500000, "freq_end_hz": 108000000, "services": [...], "region": 2, ... },
+    "3": null
+  },
+  "resolved_footnotes": {
+    "AUS37": "AUS37 — The frequency band 87–108 MHz ...",
+    "5.87": "5.87 — In the band 87.5–108 MHz ..."
+  },
+  "source": { "published_date": "2021-06-24", "last_patch_date": null },
+  "_hints": [
+    { "tool": "search_licences", "why": "find licences operating in this band" },
+    { "tool": "search_application_text", "why": "search application text for this band's usage" }
+  ]
+}
+\`\`\`
 
 ## Notes
 - The plan is updated by legislative amendment; consult the current legislation for any licensing decision.
-- A _warning is added when the base data is more than 3 years old or when no match is found.`,
+- When \`include_footnotes=false\`, the response is faster but \`resolved_footnotes\` is absent.
+- \`_warning\` is added when the base data is ≥ 3 years old; verify against the current legislation before any licensing decision.`,
     },
     decode_emission_designator: {
         summary: 'Decode an ITU/ACA emission designator (e.g. 16K0F3E) into bandwidth, modulation, signal nature, info type and optional details. [reference]',
@@ -417,7 +480,7 @@ function openDb() {
 
 function createServer(): Server {
     const server = new Server(
-        { name: 'acma-rrl-server', version: '1.9.0' },
+        { name: 'acma-rrl-server', version: '1.10.0' },
         { capabilities: { tools: {} } }
     );
 
@@ -1081,7 +1144,7 @@ async function main() {
         const status = getSyncStatus();
         const body: Record<string, unknown> = {
             status: 'ok',
-            version: '1.9.0',
+            version: '1.10.0',
             ...(status.dataAsOf !== undefined ? { dataAsOf: status.dataAsOf } : {}),
             ...(status.lastSyncAt !== undefined ? { lastSyncAt: status.lastSyncAt } : {}),
             ...(status.remoteAsOf !== undefined ? { remoteAsOf: status.remoteAsOf } : {}),
@@ -1158,7 +1221,7 @@ async function main() {
 
     const port = Number(PORT);
     const httpServer = app.listen(port, '0.0.0.0', () => {
-        log.info(`ACMA RRL MCP Server v1.9.0 running on port ${port} at http://localhost:${port}/mcp`);
+        log.info(`ACMA RRL MCP Server v1.10.0 running on port ${port} at http://localhost:${port}/mcp`);
         log.info('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query, decode_emission_designator, search_devices_by_emission');
     });
 
