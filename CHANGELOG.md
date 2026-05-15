@@ -13,6 +13,26 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - ~40 `console.error('[X] ...')` call sites across `src/sync.ts`, `src/spectrum_plan.ts`, `src/index.ts`, and `src/import_spectrum_plan.ts` rewritten to `log.info` / `log.warn` / `log.error`. Message text and `[CHANNEL]` prefixes preserved so existing `grep` muscle memory still works.
 - `DEBUG_NETWORK=true` no longer needs a special check at the call site — it now flows through the logger's level threshold.
 
+## [1.10.0] - 2026-05-15
+
+### Changed
+- Rebuilt the `spectrum_*` data from the 2021 ACMA Radiofrequency Spectrum Plan PDF. The canonical source is `seed/spectrum_plan_source.yaml`, extracted from the PDF via `tools/extract-rrsp/extract.py`. `seed/spectrum_plan.sql` is generated from the YAML by `scripts/generate-spectrum-seed.ts`.
+- `spectrum_allocations` schema: `freq_start_hz` + `freq_end_hz` (composite PK), `unit`, `page`, `services_json`, `footnotes_json`, `raw`. Legacy columns dropped (`frequency_range`, `region1`, `region2`, `region3`, `common`, `australian_table_of_allocations`, `footnote_ref`).
+- New table `spectrum_region_allocations` stores ITU Region 1/2/3 allocations independently of AU sub-range boundaries.
+- `get_frequency_allocation` response shape: `allocation` (AU primary, nullable) + `regions` (R1/R2/R3 contrast, each nullable) + `resolved_footnotes` (flat AU+intl text map). `source` carries `published_date` + `last_patch_date`.
+
+### Added
+- Patch overlay format under `seed/patches/*.yaml`. See `seed/patches/README.md` for the operation set.
+- `scripts/generate-spectrum-seed.ts` composes YAML + overlays into SQL.
+- `tools/extract-rrsp/` — Python extractor for the 2021 ACMA Spectrum Plan PDF.
+
+### Upgrade notes
+Existing databases need a re-bootstrap of the spectrum tables:
+
+```
+npm run import-spectrum-plan -- --reseed
+```
+
 ## [1.9.0] - 2026-05-15
 
 ### Added

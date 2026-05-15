@@ -6,10 +6,10 @@ The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) an
 
 ## Features
 
-- **Local mirror** of the full RRL dataset (31 materialised tables + FTS5 narrative index), kept fresh by ACMA's `/v1/Extracts` manifest API — mobile-friendly by default (no automatic 70 MB downloads).
+- **Local mirror** of the full RRL dataset (32 materialised tables + FTS5 narrative index), kept fresh by ACMA's `/v1/Extracts` manifest API — mobile-friendly by default (no automatic 70 MB downloads).
 - **Full-text search** (SQLite FTS5) over application narrative — answers "which licences mention 'remote operation'?" in milliseconds.
 - **Geospatial export** — site/device results carry coordinates and can be rendered as KML via `export_kml`.
-- **Spectrum plan lookup** — embeddable ARSP allocation table seeded from `seed/spectrum_plan.sql`; tells you what service category any frequency in Hz belongs to (FIXED, MOBILE, BROADCASTING, etc.) and surfaces relevant footnotes.
+- **Spectrum plan lookup** — `get_frequency_allocation(freq_hz)` returns the AU primary allocation plus ITU Region 1/2/3 contrast rows and resolved footnote text. Data rebuilt from the 2021 ACMA Spectrum Plan PDF; seeded from `seed/spectrum_plan.sql`.
 - **Power-user SQL** — `execute_sql` runs sandboxed SELECT/WITH queries in a worker thread; `explain_query`, `describe_schema`, and `list_sample_queries` make the schema discoverable.
 - **Progressive disclosure** — `tools/list` returns terse one-liners; `describe_tool(<name>)` fetches the full markdown when needed (matterfront pattern).
 
@@ -62,31 +62,31 @@ For stdio mode (Claude Desktop), point the client at the compiled entry point �
 
 ## Spectrum plan
 
-The Australian Radiofrequency Spectrum Plan is stored in four `spectrum_*` tables alongside the RRL data. The canonical source is `seed/spectrum_plan.sql` (text, committed to git, ~430 KB / 1100 lines). On a fresh DB, the seed is auto-applied at the tail of `performFullSync`.
+The Australian Radiofrequency Spectrum Plan is stored in five `spectrum_*` tables alongside the RRL data:
 
-To refresh after an ACMA legislative amendment:
+- `spectrum_allocations` — AU primary allocations keyed by `(freq_start_hz, freq_end_hz)`.
+- `spectrum_region_allocations` — ITU Region 1/2/3 allocations keyed independently of AU sub-range boundaries.
+- `spectrum_australian_footnotes`, `spectrum_international_footnotes`, `spectrum_plan_meta`.
+
+**Source pipeline.** The canonical source is `seed/spectrum_plan_source.yaml`, extracted from the 2021 ACMA Spectrum Plan PDF by `tools/extract-rrsp/extract.py`. `seed/spectrum_plan.sql` is generated from the YAML plus any overlays in `seed/patches/*.yaml` by `scripts/generate-spectrum-seed.ts`. On a fresh DB, the seed is auto-applied at the tail of `performFullSync`.
+
+**`get_frequency_allocation` response shape.** Returns `allocation` (AU primary row, nullable), `regions` (R1/R2/R3 contrast rows, each nullable), `resolved_footnotes` (flat text map for all referenced AU and international footnotes), and `source` (with `published_date` and `last_patch_date`).
+
+To apply an ACMA amendment:
 
 ```bash
-# 1. Write a hand-curated patch from the published amendment
-$EDITOR seed/patches/$(date +%Y-%m-%d)-anqf-update.sql
+# 1. Write a YAML overlay — see seed/patches/README.md for the operation set
+$EDITOR seed/patches/$(date +%Y-%m-%d)-<topic>.yaml
 
-# 2. Apply it (idempotent: skip if the patch defines its own conditions)
-npm run import-spectrum-plan -- --patch seed/patches/2027-08-12-anqf-update.sql
+# 2. Regenerate the SQL seed
+npx tsx scripts/generate-spectrum-seed.ts
 
-# 3. Regenerate the canonical snapshot
-npm run dump-spectrum-plan
+# 3. Apply to the DB
+npm run import-spectrum-plan -- --reseed
 
-# 4. Commit both the patch and the new seed
+# 4. Commit the overlay and regenerated seed
 git add seed/
-git commit -m "data(spectrum): apply amendment 2027-08-12"
-```
-
-To reseed from scratch (or load a different source):
-
-```bash
-npm run import-spectrum-plan -- --reseed                                  # from seed/spectrum_plan.sql
-npm run import-spectrum-plan -- --reseed --source path/to/other.sql
-npm run import-spectrum-plan -- --reseed --source path/to/source.db       # legacy schema; range parser normalises
+git commit -m "data(spectrum): apply amendment $(date +%Y-%m-%d)"
 ```
 
 ## Configuration
