@@ -26,9 +26,9 @@ EXTRACTOR_VERSION = "1.0.0"
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUTPUT_YAML = REPO_ROOT / "seed" / "spectrum_plan_source.yaml"
 
-ALLOCATION_PAGES = range(30, 112)
-AU_FOOTNOTE_PAGES = range(111, 119)
-INTL_FOOTNOTE_PAGES = range(119, 214)
+ALLOCATION_PAGES = range(30, 112)    # physical 31–112
+AU_FOOTNOTE_PAGES = range(111, 119)  # physical 112–119; page 112 intentionally appears in both (split page)
+INTL_FOOTNOTE_PAGES = range(119, 214) # physical 120–214
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -85,7 +85,11 @@ def _extract_allocations(pdf) -> tuple[list[dict], list[dict]]:
             continue
         tables = page.extract_tables()
         for tbl in tables:
-            # Skip header rows. Real data rows have 4 columns: R1, R2, R3, AU.
+            # pdfplumber replicates both header rows on every page: row 0 is
+            # the column group labels ("Column 1: ITU Radio Regulation" etc.)
+            # and row 1 is the sub-labels ("Region 1", "Region 2", …, "Australian
+            # Table of Allocation").  Verified against page indices 30–32 and 105
+            # (sampled kHz, MHz, and GHz band pages).  Skip both unconditionally.
             for row in tbl[2:]:
                 if not any(row):
                     continue
@@ -136,7 +140,7 @@ def _extract_footnotes(pdf, page_range, *, is_australian: bool) -> list[dict]:
             if m:
                 flush()
                 current_ref = m.group(1)
-                rest = m.group(2).strip() if m.lastindex and m.lastindex >= 2 else ""
+                rest = m.group(2).strip()
                 current_buf = [rest] if rest else []
                 current_page = page_num + 1
             else:

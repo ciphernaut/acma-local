@@ -18,7 +18,7 @@ class Footnote(TypedDict):
 
 
 _AUS_REF = re.compile(r"^(AUS\d+[A-Z]*)(.*)$")
-_INTL_REF = re.compile(r"^(\d{1,3}[A-Z]{0,2})(.*)$")
+_INTL_REF = re.compile(r"^(\d{1,3}[A-Z]{0,2})\s+(.+)$")
 _PAGE_NUMBER_ONLY = re.compile(r"^\s*\d+\s*$")
 _HEADER_PATTERNS = [
     re.compile(r"^Australian Radiofrequency Spectrum Plan 2021", re.IGNORECASE),
