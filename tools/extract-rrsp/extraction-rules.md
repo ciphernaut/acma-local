@@ -40,7 +40,7 @@ Each table cell may contain multiple lines: a frequency sub-range (bold), one or
 - Lines starting with a numeric / alphanumeric token (`\d{1,3}[A-Z]{0,2}`) begin a new footnote.
 - Continuation handling same as §6.
 - Drop the same running headers/footers.
-- The international table also includes "Group" intro lines (e.g. `5.1A`) — preserve these as their own footnote entries with the leading dot kept.
+- The international footnotes also include grouping/section intro lines (e.g. `5.1A`) interleaved among the numbered refs — preserve these as their own footnote entries verbatim.
 
 ## 8. Token Normalisation
 - Footnote refs uppercase: `aus49` → `AUS49`.
