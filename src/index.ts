@@ -1011,11 +1011,11 @@ function createServer(): Server {
             }
             const decoded = decodeEmissionDesignator(code);
             const response: any = { ...decoded };
-            if (decoded.valid && decoded.modulation && decoded.info_type) {
+            if (decoded.valid) {
                 response._hints = [
                     {
                         tool: 'search_devices_by_emission',
-                        args: { modulation: decoded.modulation.code, info_type: decoded.info_type.code },
+                        args: { modulation: decoded.modulation!.code, info_type: decoded.info_type!.code },
                         why: 'find every device using this same emission pattern',
                     },
                     {
@@ -1023,8 +1023,6 @@ function createServer(): Server {
                         why: 'aggregate device counts by this emission code',
                     },
                 ];
-            } else {
-                response._hints = [];
             }
             return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
         }
