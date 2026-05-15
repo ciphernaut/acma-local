@@ -13,6 +13,18 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - ~40 `console.error('[X] ...')` call sites across `src/sync.ts`, `src/spectrum_plan.ts`, `src/index.ts`, and `src/import_spectrum_plan.ts` rewritten to `log.info` / `log.warn` / `log.error`. Message text and `[CHANNEL]` prefixes preserved so existing `grep` muscle memory still works.
 - `DEBUG_NETWORK=true` no longer needs a special check at the call site — it now flows through the logger's level threshold.
 
+## [1.9.0] - 2026-05-15
+
+### Added
+- `decode_emission_designator` MCP tool — parse the ITU/ACA emission designator stored in `device_details.EMISSION` into structured fields (bandwidth, modulation, signal nature, info type, optional signal-detail + multiplex).
+- `search_devices_by_emission` MCP tool — find devices/licences by decoded descriptor (modulation, info type, signal nature, etc.). Accepts code letters or description substrings; ambiguous matches return an explicit candidate list.
+- Five lookup tables (`emission_modulation`, `emission_signal_nature`, `emission_info_type`, `emission_signal_detail`, `emission_multiplex`) with the full code alphabet from the ACA "Emission characteristics of radio transmissions" booklet (ITU worldwide standard, 1982). Auto-bootstrapped on full sync from `seed/emissions.sql`.
+- `npm run import-emissions` / `npm run dump-emissions` scripts for reseeding and regeneration from `CODE_TABLES`.
+- Two sample queries (`list_sample_queries`) demonstrating SUBSTR joins against `emission_modulation`.
+
+### Changed
+- Tool count 16 → 18; table count 26 → 31.
+
 ## [1.8.0] - 2026-05-14
 
 ### Added
