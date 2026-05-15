@@ -98,9 +98,9 @@ export function searchDevicesByEmission(
     const hasResolved = Object.keys(resolved).length > 0;
     const hasBandwidthBounds =
         filters.min_bandwidth_hz !== undefined || filters.max_bandwidth_hz !== undefined;
-    const hasOther = filters.licence_no !== undefined || filters.state !== undefined;
+    const hasDirectFilters = filters.licence_no !== undefined || filters.state !== undefined;
 
-    if (!hasResolved && !hasBandwidthBounds && !hasOther) {
+    if (!hasResolved && !hasBandwidthBounds && !hasDirectFilters) {
         return {
             rows: [],
             truncated: false,
@@ -124,7 +124,6 @@ export function searchDevicesByEmission(
         params.push(filters.licence_no);
     }
 
-    const joinSite = filters.state !== undefined;
     if (filters.state !== undefined) {
         where.push('s.STATE = ?');
         params.push(filters.state);
@@ -139,22 +138,20 @@ export function searchDevicesByEmission(
             d.FREQUENCY,
             d.EMISSION,
             d.SITE_ID,
-            ${joinSite
-                ? 's.STATE'
-                : '(SELECT STATE FROM site WHERE SITE_ID = d.SITE_ID)'
-            } AS STATE,
+            s.STATE AS STATE,
             d.TRANSMITTER_POWER,
             d.TRANSMITTER_POWER_UNIT
         FROM device_details d
         LEFT JOIN licence l ON l.LICENCE_NO = d.LICENCE_NO
-        ${joinSite ? 'LEFT JOIN site s ON s.SITE_ID = d.SITE_ID' : ''}
+        LEFT JOIN site s ON s.SITE_ID = d.SITE_ID
         WHERE ${where.join(' AND ')}
+        ORDER BY d.LICENCE_NO, d.SDD_ID
         LIMIT ?
     `;
 
     const rawRows = db.prepare(sql).all(...params, cap + 1) as Array<Record<string, unknown>>;
-    const truncated = rawRows.length > cap;
-    const sliced = truncated ? rawRows.slice(0, cap) : rawRows;
+    const rawTruncated = rawRows.length > cap;
+    const sliced = rawTruncated ? rawRows.slice(0, cap) : rawRows;
 
     // Decorate each row with decoded fields, and apply bandwidth bounds post-query
     // (cheaper than a SQL expression and lets us skip unparseable rows gracefully).
@@ -204,5 +201,9 @@ export function searchDevicesByEmission(
         });
     }
 
-    return { rows: enriched, truncated, resolved_filters: resolved };
+    return {
+        rows: enriched,
+        truncated: rawTruncated && enriched.length >= cap,
+        resolved_filters: resolved,
+    };
 }

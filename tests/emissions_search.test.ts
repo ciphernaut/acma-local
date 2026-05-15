@@ -28,10 +28,12 @@ describe('searchDevicesByEmission', () => {
             (3, 'L003', '10M0W7D', 2400000000, 'S2'),
             (4, 'L004', '2K80J3E',    7000000, 'S3'),
             (5, 'L005', '6M25C3F',  500000000, 'S2'),
-            (6, 'L006', '10K1R3C',  152000000, 'S1')`).run();
+            (6, 'L006', '10K1R3C',  152000000, 'S1'),
+            (7, 'L007', '19M8W7DEW', 900000000, 'S1')`).run();
         db.prepare(`INSERT INTO licence(LICENCE_NO, CLIENT_NO) VALUES
             ('L001', 100), ('L002', 100), ('L003', 200),
-            ('L004', 300), ('L005', 400), ('L006', 500)`).run();
+            ('L004', 300), ('L005', 400), ('L006', 500),
+            ('L007', 700)`).run();
         db.prepare(`INSERT INTO site(SITE_ID, STATE) VALUES
             ('S1', 'NSW'), ('S2', 'QLD'), ('S3', 'VIC')`).run();
     });
@@ -89,7 +91,7 @@ describe('searchDevicesByEmission', () => {
     });
 
     test('state filter excludes non-matching states', () => {
-        const r = searchDevicesByEmission(db, { modulation: 'W', state: 'NSW' });
+        const r = searchDevicesByEmission(db, { modulation: 'W', state: 'VIC' });
         expect(r.rows).toEqual([]);
     });
 
@@ -107,5 +109,27 @@ describe('searchDevicesByEmission', () => {
     test('truncated=false when below limit', () => {
         const r = searchDevicesByEmission(db, { modulation: 'F', limit: 100 });
         expect(r.truncated).toBe(false);
+    });
+
+    test('signal_detail filter (9-char form)', () => {
+        const r = searchDevicesByEmission(db, { signal_detail: 'E' });
+        expect(r.rows.map(x => x.LICENCE_NO)).toEqual(['L007']);
+    });
+
+    test('multiplex filter (9-char form)', () => {
+        const r = searchDevicesByEmission(db, { multiplex: 'W' });
+        expect(r.rows.map(x => x.LICENCE_NO)).toEqual(['L007']);
+    });
+
+    test('licence_no filter', () => {
+        const r = searchDevicesByEmission(db, { licence_no: 'L001' });
+        expect(r.rows.map(x => x.LICENCE_NO)).toEqual(['L001']);
+    });
+
+    test('bandwidth-only filter (no code filters) is allowed', () => {
+        const r = searchDevicesByEmission(db, { min_bandwidth_hz: 5_000_000, max_bandwidth_hz: 20_000_000 });
+        // 10M0W7D (10 MHz), 6M25C3F (6.25 MHz), 19M8W7DEW (19.8 MHz) — three matches
+        const codes = r.rows.map(x => x.LICENCE_NO).sort();
+        expect(codes).toEqual(['L003', 'L005', 'L007']);
     });
 });
