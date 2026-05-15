@@ -6,7 +6,9 @@
  *                    get_licence_details, get_site_details, sync_data,
  *                    execute_sql, list_sample_queries, export_kml,
  *                    search_bsl, search_spectrum_band, search_application_text,
- *                    describe_schema, describe_tool, explain_query.
+ *                    describe_schema, describe_tool, explain_query,
+ *                    get_frequency_allocation, decode_emission_designator,
+ *                    search_devices_by_emission.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -32,6 +34,8 @@ import {
 import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery } from './sql.js';
 import { generateKml } from './kml.js';
 import { lookupFrequencyAllocation } from './spectrum_plan.js';
+import { decodeEmissionDesignator } from './emissions.js';
+import { searchDevicesByEmission } from './emissions_search.js';
 import { log } from './logger.js';
 
 const dbPath = process.env.ACMA_DB_PATH || DEFAULT_CONFIG.dbPath;
@@ -301,6 +305,62 @@ Look up the Australian Radiofrequency Spectrum Plan (ARSP) allocation for a give
   _warning when the base is more than 3 years old.
 - Multiple matches usually indicate overlapping bands from a patched plan; check the warning.`,
     },
+    decode_emission_designator: {
+        summary: 'Decode an ITU/ACA emission designator (e.g. 16K0F3E) into bandwidth, modulation, signal nature, info type and optional details. [reference]',
+        tags: ['reference', 'emission'],
+        fullDescription: `
+### [Decode Emission Designator]
+Decode an ITU/ACA emission designator (the 7- or 9-character code stored in \`device_details.EMISSION\`) into structured fields.
+
+## Usage
+- Pass the raw designator string. Trailing whitespace is tolerated.
+- Returns parsed bandwidth (Hz + display), modulation, signal nature, info type, and (when present) signal detail + multiplex.
+
+## Input
+- code: e.g. "16K0F3E" (classic FM telephony), "10M0W7D" (combined-mode digital data), "19M8W7DEW" (9-char form with optional fields).
+
+## Output
+- valid: true if bandwidth parsed AND all three required body codes are known. Optional codes are recorded as warnings, not errors.
+- warnings[]: non-fatal observations (whitespace, unknown optional codes, length mismatch).
+- _hints: includes a search_devices_by_emission call with the parsed modulation + info_type prefilled, so finding every device matching the same emission is one click away.
+
+## Notes
+- The decoder is the inverse of search_devices_by_emission: one designator → many fields; use search_devices_by_emission to go the other way (one filter → many devices).
+- Codes are per the ACA "Emission characteristics of radio transmissions" booklet (ITU worldwide standard, 1982).`,
+    },
+    search_devices_by_emission: {
+        summary: 'Find devices/licences whose emission designator matches decoded filters (modulation, info type, etc.) — accepts code letters or descriptions. [search]',
+        tags: ['search', 'emission'],
+        fullDescription: `
+### [Search Devices by Emission]
+Find device_details rows whose EMISSION designator matches one or more decoded descriptors.
+
+## Usage
+- Each filter may be a code letter (e.g. \`modulation: 'F'\`) OR a description substring (e.g. \`modulation: 'frequency modulation'\`, or just \`'frequency'\`).
+- At least one filter is required.
+- Description substring is matched case-insensitively against the relevant emission_* lookup table.
+- If a description resolves to zero or more than one code, the tool returns an explicit \`_error\` listing the candidates rather than silently picking one.
+
+## Input
+- modulation:     code letter or description substring (e.g. 'F', 'frequency', 'reduced').
+- signal_nature:  code digit or description substring (e.g. '3', 'single channel analogue').
+- info_type:      code letter or description substring (e.g. 'C', 'facsimile', 'telephony').
+- signal_detail:  optional. Code letter or description substring.
+- multiplex:      optional. Code letter or description substring.
+- min_bandwidth_hz, max_bandwidth_hz: bandwidth bounds in Hz. Devices with unparseable EMISSION are excluded when these are set.
+- licence_no:     restrict to one licence.
+- state:          state code from the joined site row (e.g. 'NSW', 'QLD').
+- limit:          default 100, max 500.
+
+## Output
+- rows[]: each row carries LICENCE_NO, CLIENT_NO, FREQUENCY, EMISSION, decoded summary (modulation/info-type descriptions, parsed bandwidth), SITE_ID, STATE, and transmitter power.
+- resolved_filters: echoes back the codes the handler actually matched on — useful when you passed a description.
+- _hints: links to get_licence_details for the first row, decode_emission_designator for full breakdowns, and execute_sql for aggregation.
+
+## Notes
+- Description-only resolution is the common case; you don't need to memorise that R = SSB-reduced-carrier or C = facsimile.
+- For aggregate questions ("most common modulation across all devices"), use execute_sql with SUBSTR + emission_modulation join — see list_sample_queries.`,
+    },
 };
 
 // ─── Result Cache ────────────────────────────────────────────────────────────
@@ -347,7 +407,7 @@ function openDb() {
 
 function createServer(): Server {
     const server = new Server(
-        { name: 'acma-rrl-server', version: '1.8.0' },
+        { name: 'acma-rrl-server', version: '1.9.0' },
         { capabilities: { tools: {} } }
     );
 
@@ -566,6 +626,36 @@ function createServer(): Server {
                         },
                     },
                     required: ['freq_hz'],
+                },
+            },
+            {
+                name: 'decode_emission_designator',
+                description: TOOL_DOCS.decode_emission_designator!.summary,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        code: { type: 'string', description: 'Emission designator, e.g. 16K0F3E or 10M0W7D' },
+                    },
+                    required: ['code'],
+                },
+            },
+            {
+                name: 'search_devices_by_emission',
+                description: TOOL_DOCS.search_devices_by_emission!.summary,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        modulation:       { type: 'string', description: "Code letter (e.g. 'R', 'F') or description substring (e.g. 'reduced', 'frequency modulation')" },
+                        signal_nature:    { type: 'string', description: "Code digit (e.g. '3') or description substring" },
+                        info_type:        { type: 'string', description: "Code letter (e.g. 'C', 'E') or description substring (e.g. 'facsimile', 'telephony')" },
+                        signal_detail:    { type: 'string', description: 'Optional. Code letter or description substring.' },
+                        multiplex:        { type: 'string', description: 'Optional. Code letter or description substring.' },
+                        min_bandwidth_hz: { type: 'number',  description: 'Lower bound on parsed bandwidth (inclusive).' },
+                        max_bandwidth_hz: { type: 'number',  description: 'Upper bound on parsed bandwidth (inclusive).' },
+                        licence_no:       { type: 'string',  description: 'Restrict to one licence.' },
+                        state:            { type: 'string',  description: "State code from the joined site row (e.g. 'NSW')." },
+                        limit:            { type: 'integer', description: 'Default 100, max 500.' },
+                    },
                 },
             },
         ],
@@ -914,6 +1004,48 @@ function createServer(): Server {
             } finally { if (db.open) db.close(); }
         }
 
+        if (name === 'decode_emission_designator') {
+            const code = args?.code as string;
+            if (typeof code !== 'string') {
+                return { content: [{ type: 'text', text: JSON.stringify({ _error: 'code must be a string.' }, null, 2) }] };
+            }
+            const decoded = decodeEmissionDesignator(code);
+            const response: any = { ...decoded };
+            if (decoded.valid && decoded.modulation && decoded.info_type) {
+                response._hints = [
+                    {
+                        tool: 'search_devices_by_emission',
+                        args: { modulation: decoded.modulation.code, info_type: decoded.info_type.code },
+                        why: 'find every device using this same emission pattern',
+                    },
+                    {
+                        tool: 'execute_sql',
+                        why: 'aggregate device counts by this emission code',
+                    },
+                ];
+            } else {
+                response._hints = [];
+            }
+            return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+        }
+
+        if (name === 'search_devices_by_emission') {
+            const db = openDb();
+            try {
+                const result = searchDevicesByEmission(db, (args ?? {}) as any);
+                const response: any = { ...result };
+                if (!result._error && result.rows.length > 0) {
+                    const first = result.rows[0]!;
+                    response._hints = [
+                        { tool: 'get_licence_details', args: { licence_no: first.LICENCE_NO }, why: 'open the first matching licence' },
+                        { tool: 'decode_emission_designator', args: { code: first.EMISSION.trim() }, why: 'full breakdown of any returned EMISSION value' },
+                        { tool: 'execute_sql', why: 'aggregate or refine these results' },
+                    ];
+                }
+                return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+            } finally { if (db.open) db.close(); }
+        }
+
         return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
     });
 
@@ -941,7 +1073,7 @@ async function main() {
         const status = getSyncStatus();
         const body: Record<string, unknown> = {
             status: 'ok',
-            version: '1.8.0',
+            version: '1.9.0',
             ...(status.dataAsOf !== undefined ? { dataAsOf: status.dataAsOf } : {}),
             ...(status.lastSyncAt !== undefined ? { lastSyncAt: status.lastSyncAt } : {}),
             ...(status.remoteAsOf !== undefined ? { remoteAsOf: status.remoteAsOf } : {}),
@@ -1018,8 +1150,8 @@ async function main() {
 
     const port = Number(PORT);
     const httpServer = app.listen(port, '0.0.0.0', () => {
-        log.info(`ACMA RRL MCP Server v1.8.0 running on port ${port} at http://localhost:${port}/mcp`);
-        log.info('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query');
+        log.info(`ACMA RRL MCP Server v1.9.0 running on port ${port} at http://localhost:${port}/mcp`);
+        log.info('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query, decode_emission_designator, search_devices_by_emission');
     });
 
     // Graceful shutdown on SIGTERM (systemd / docker stop) and SIGINT (Ctrl-C).
