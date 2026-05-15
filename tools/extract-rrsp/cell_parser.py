@@ -27,7 +27,7 @@ class ParsedCell(TypedDict):
     raw: str
 
 
-_FOOTNOTE_TOKEN = re.compile(r"\b(?:AUS\d+[A-Z]*|\d{1,3}[A-Z]{0,2})\b", re.IGNORECASE)
+_FOOTNOTE_TOKEN = re.compile(r"\b(?:(?i:AUS)\d+[A-Z]*|\d{1,3}[A-Z]{0,2})\b")
 _QUALIFIER = re.compile(r"\((?:[^()]|\([^()]*\))*\)")
 
 

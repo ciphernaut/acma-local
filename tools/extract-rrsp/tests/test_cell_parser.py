@@ -32,11 +32,13 @@ def test_qualifier_attached_to_service():
             "inline_footnotes": ["73"],
         }
     ]
+    assert result["footnotes"] == []
 
 
 def test_multi_ref_inline():
     result = parse_cell(cells.MULTI_REF_INLINE)
     assert result["services"][0]["inline_footnotes"] == ["79", "79A"]
+    assert result["footnotes"] == []
 
 
 def test_multi_ref_cell_level():
