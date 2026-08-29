@@ -13,6 +13,15 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - ~40 `console.error('[X] ...')` call sites across `src/sync.ts`, `src/spectrum_plan.ts`, `src/index.ts`, and `src/import_spectrum_plan.ts` rewritten to `log.info` / `log.warn` / `log.error`. Message text and `[CHANNEL]` prefixes preserved so existing `grep` muscle memory still works.
 - `DEBUG_NETWORK=true` no longer needs a special check at the call site — it now flows through the logger's level threshold.
 
+### Fixed
+- **`get_frequency_allocation` on a pre-1.10 database** now returns a "run `--reseed`" message instead of a raw SQLite `no such column` error. The emptiness guard passed (legacy rows are present), so the lookup fell straight through to columns that do not exist there. Affects every install upgraded from 1.9 without a full sync.
+- **Seed loads run inside a SAVEPOINT**, with the seed file's own `BEGIN`/`COMMIT` stripped first (`bootstrapSpectrumPlan`, `applyReseed`, `import-spectrum-plan --reseed`). A load that failed part-way previously left the transaction OPEN on the connection, silently rolling back the emission-table bootstrap that shares it in `performFullSync`.
+- **`npm test -- <file>` now selects that file.** `--testPathIgnorePatterns` is a yargs array option and was greedily consuming the trailing positional, so the named file was *ignored* and every other suite ran — reporting green for a file that never executed. The script now ends with `--`.
+- `scripts/generate-spectrum-seed.ts` resolves its repo root via `fileURLToPath` rather than `URL.pathname`, which percent-encodes: any repo path containing a space failed to locate the source YAML.
+- ITU region lookup sorts before `LIMIT 1` instead of returning an arbitrary overlapping row.
+- Remaining `console.error` diagnostics in `src/spectrum_plan.ts` and `src/import_spectrum_plan.ts` routed through `src/logger.ts`, completing the 1.9.0 conversion.
+
+
 ## [1.10.0] - 2026-05-15
 
 ### Changed

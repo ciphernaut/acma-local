@@ -108,6 +108,32 @@ export function resetSpectrumTables(db: BetterSqlite3Database): void {
 }
 
 /**
+ * Execute a generated seed file inside a SAVEPOINT.
+ *
+ * The generator emits its own BEGIN/COMMIT, which better-sqlite3 runs verbatim.
+ * If a statement fails mid-file, that transaction is left OPEN on the
+ * connection: any later work on the same connection then silently rolls back
+ * when it closes (e.g. the emission-table bootstrap that shares this
+ * connection in performFullSync). Strip the file's own transaction control and
+ * impose our own, so a failed load rolls back exactly itself and leaves the
+ * connection usable.
+ */
+export function execSeedSql(db: BetterSqlite3Database, sql: string): void {
+    const stripped = sql
+        .replace(/^\s*BEGIN(\s+TRANSACTION)?\s*;/gim, '')
+        .replace(/^\s*COMMIT\s*;/gim, '');
+    const savepoint = 'spectrum_seed';
+    db.exec(`SAVEPOINT ${savepoint}`);
+    try {
+        db.exec(stripped);
+        db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    } catch (e) {
+        db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
+        throw e;
+    }
+}
+
+/**
  * Returns true if spectrum_allocations exists but has the old column layout
  * (pre-Task-9 schema: frequency_range TEXT or region1 TEXT columns).
  */
@@ -130,7 +156,7 @@ export function spectrumSchemaIsLegacy(db: BetterSqlite3Database): boolean {
 export function bootstrapSpectrumPlan(db: BetterSqlite3Database, seedPath: string): void {
     // Migrate legacy schema if present.
     if (spectrumSchemaIsLegacy(db)) {
-        console.error('[SPECTRUM] Legacy schema detected — dropping and recreating spectrum tables.');
+        log.warn('[SPECTRUM] Legacy schema detected — dropping and recreating spectrum tables.');
         resetSpectrumTables(db);
     }
 
@@ -145,7 +171,7 @@ export function bootstrapSpectrumPlan(db: BetterSqlite3Database, seedPath: strin
     try {
         log.info(`[SPECTRUM] Bootstrapping spectrum tables from ${seedPath}`);
         const sql = fs.readFileSync(seedPath, 'utf-8');
-        db.exec(sql);
+        execSeedSql(db, sql);
     } catch (e) {
         log.error(`[SPECTRUM] Bootstrap failed: ${(e as Error).message}. Spectrum tables remain empty.`);
     }
@@ -232,7 +258,7 @@ export function lookupFrequencyAllocation(
     const regions: { 1: AllocationRow | null; 2: AllocationRow | null; 3: AllocationRow | null } = { 1: null, 2: null, 3: null };
     for (const region of [1, 2, 3] as const) {
         const row = db.prepare(
-            'SELECT freq_start_hz, freq_end_hz, unit, page, services_json, footnotes_json, raw FROM spectrum_region_allocations WHERE region = ? AND ? >= freq_start_hz AND ? < freq_end_hz LIMIT 1'
+            'SELECT freq_start_hz, freq_end_hz, unit, page, services_json, footnotes_json, raw FROM spectrum_region_allocations WHERE region = ? AND ? >= freq_start_hz AND ? < freq_end_hz ORDER BY freq_start_hz, freq_end_hz LIMIT 1'
         ).get(region, freqHz, freqHz) as RawDbRow | undefined;
         if (row) {
             regions[region] = rowToAllocationRow(row, region);
@@ -291,7 +317,7 @@ export function applyReseed(db: BetterSqlite3Database, sourcePath: string): void
     }
     resetSpectrumTables(db);
     const sql = fs.readFileSync(sourcePath, 'utf-8');
-    db.exec(sql);
+    execSeedSql(db, sql);
     const now = new Date().toISOString();
     db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)').run('imported_at', now);
     log.info(`[SPECTRUM] Reseeded from ${sourcePath}`);

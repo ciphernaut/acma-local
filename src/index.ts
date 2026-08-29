@@ -33,7 +33,7 @@ import {
 } from './logic.js';
 import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery } from './sql.js';
 import { generateKml } from './kml.js';
-import { lookupFrequencyAllocation } from './spectrum_plan.js';
+import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
 import { searchDevicesByEmission } from './emissions_search.js';
 import { log } from './logger.js';
@@ -1034,6 +1034,12 @@ function createServer(): Server {
             }
             const db = openDb();
             try {
+                // A DB synced under <=1.9 keeps the pre-1.10 columns AND its rows, so
+                // the emptiness check below would pass and the lookup would then fail
+                // with a raw "no such column" error instead of a usable message.
+                if (spectrumSchemaIsLegacy(db)) {
+                    return { content: [{ type: 'text', text: JSON.stringify({ _error: "Spectrum plan tables are on the pre-1.10 schema. Run 'npm run import-spectrum-plan -- --reseed' to migrate." }, null, 2) }] };
+                }
                 const tableCount = (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n;
                 if (tableCount === 0) {
                     return { content: [{ type: 'text', text: JSON.stringify({ _error: "Spectrum plan data not loaded. Run 'npm run import-spectrum-plan -- --reseed'." }, null, 2) }] };

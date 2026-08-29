@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { initializeDatabase } from './db.js';
-import { resetSpectrumTables } from './spectrum_plan.js';
+import { resetSpectrumTables, execSeedSql } from './spectrum_plan.js';
 import { DEFAULT_CONFIG } from './sync.js';
 import { log } from './logger.js';
 
@@ -49,18 +49,18 @@ function main() {
     // If a patch file was provided, copy it into seed/patches/ first.
     if (patchArg) {
         if (!fs.existsSync(patchArg)) {
-            console.error(`Error: patch file not found: ${patchArg}`);
+            log.error(`Error: patch file not found: ${patchArg}`);
             process.exit(1);
         }
         const patchesDir = path.join(repoRoot, 'seed', 'patches');
         fs.mkdirSync(patchesDir, { recursive: true });
         const dest = path.join(patchesDir, path.basename(patchArg));
         fs.copyFileSync(patchArg, dest);
-        console.error(`Copied patch to ${dest}`);
+        log.info(`Copied patch to ${dest}`);
     }
 
     // Regenerate seed/spectrum_plan.sql from YAML source + any patches.
-    console.error('Regenerating seed/spectrum_plan.sql...');
+    log.info('Regenerating seed/spectrum_plan.sql...');
     execSync('npx tsx scripts/generate-spectrum-seed.ts', { stdio: 'inherit', cwd: repoRoot });
 
     if (reseed) {
@@ -75,7 +75,7 @@ function main() {
             resetSpectrumTables(db);
             const seedPath = path.join(repoRoot, 'seed', 'spectrum_plan.sql');
             const sql = fs.readFileSync(seedPath, 'utf-8');
-            db.exec(sql);
+            execSeedSql(db, sql);
             const n = (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n;
             log.info(`[SPECTRUM] Reseeded: ${n} allocation rows loaded.`);
         } finally {

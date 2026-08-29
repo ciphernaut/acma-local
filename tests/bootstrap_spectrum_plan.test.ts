@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TABLE_METADATA } from '../src/db.js';
-import { bootstrapSpectrumPlan, resetSpectrumTables, spectrumSchemaIsLegacy } from '../src/spectrum_plan.js';
+import { bootstrapSpectrumPlan, resetSpectrumTables, spectrumSchemaIsLegacy, execSeedSql } from '../src/spectrum_plan.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +47,42 @@ function legacySpectrumDb(): Database.Database {
     db.exec(`CREATE TABLE spectrum_plan_meta(key TEXT PRIMARY KEY, value TEXT)`);
     return db;
 }
+
+describe('execSeedSql', () => {
+    const ROW = `INSERT INTO spectrum_allocations(freq_start_hz, freq_end_hz, unit, page, services_json, footnotes_json, raw)`;
+
+    test('applies a seed carrying its own BEGIN/COMMIT', () => {
+        const db = freshSpectrumDb();
+        execSeedSql(db, `BEGIN TRANSACTION;\n${ROW} VALUES(1, 2, 'Hz', 1, '[]', '[]', 'ok');\nCOMMIT;\n`);
+        const n = (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n;
+        expect(n).toBe(1);
+        expect(db.inTransaction).toBe(false);
+        db.close();
+    });
+
+    test('a failed load rolls back and leaves no open transaction', () => {
+        const db = freshSpectrumDb();
+        expect(() => execSeedSql(db, [
+            'BEGIN TRANSACTION;',
+            `${ROW} VALUES(1, 2, 'Hz', 1, '[]', '[]', 'partial');`,
+            'INSERT INTO no_such_table(x) VALUES(1);',
+            'COMMIT;',
+        ].join('\n'))).toThrow();
+
+        // The partial insert must not survive...
+        const n = (db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n;
+        expect(n).toBe(0);
+
+        // ...and the connection must be left usable, not stuck inside the seed's
+        // own open transaction — otherwise later work on the same connection
+        // (the emission-table bootstrap in performFullSync) is silently rolled
+        // back when it closes.
+        expect(db.inTransaction).toBe(false);
+        db.exec(`${ROW} VALUES(3, 4, 'Hz', 1, '[]', '[]', 'after');`);
+        expect((db.prepare('SELECT COUNT(*) AS n FROM spectrum_allocations').get() as { n: number }).n).toBe(1);
+        db.close();
+    });
+});
 
 describe('resetSpectrumTables', () => {
     test('drops and recreates tables with new schema', () => {

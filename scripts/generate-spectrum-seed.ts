@@ -4,6 +4,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 
 interface Service {
@@ -159,7 +160,9 @@ export function generateSeedSql(doc: SourceDoc): string {
 }
 
 function main(): void {
-    const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    // fileURLToPath, not URL.pathname: the latter percent-encodes, so any repo
+    // path containing a space resolves to a nonexistent directory.
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const sourcePath = path.join(repoRoot, 'seed', 'spectrum_plan_source.yaml');
     const patchesDir = path.join(repoRoot, 'seed', 'patches');
     const outPath = path.join(repoRoot, 'seed', 'spectrum_plan.sql');
