@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-08-30
+
+> **Upgrading.** The spectrum plan data is replaced wholesale: the baseline moves from
+> the ARSP 2021 as made (`F2021L00617`, which ceased to be in force on 8 October 2025)
+> to compilation `F2025C01105` (9 October 2025, incorporating `F2025L01230` / WRC-23).
+> Existing databases must run `npm run import-spectrum-plan -- --reseed`; a database
+> upgraded from 1.9 or earlier needs it in any case, since `get_frequency_allocation`
+> now detects the legacy schema and says so. No RRL data is affected.
+
 ### Added
 - **`LOG_LEVEL` env var** (`error` / `warn` / `info` (default) / `debug`). All in-source logging goes through `src/logger.ts`; lower levels suppress noisier ones. `DEBUG_NETWORK` kept as a legacy alias.
 - **Richer `/health` endpoint** — now returns JSON with `status`, `version`, `dataAsOf`, `lastSyncAt`, `remoteAsOf`, `behindByHours`, `isSyncing`. Optional `?deep=1` parameter opens the DB read-only and runs a probe SELECT; responds 500 / `status: degraded` if the DB is unreachable.
@@ -35,6 +44,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - **Frequency grammar tightened (#3).** Thousands groups must be exactly three digits and `end > start` is enforced, so the render artefact `1 6121.35 – 1 626.5` is rejected rather than silently read as 16 121.35 MHz → 1 626.5 MHz. Four typographic errors in the source document are corrected through an explicit, individually-justified `SOURCE_ERRATA` table; each entry must fire, and the run reports any that does not.
 - **Footnote extraction fixes.** The running-header pattern was pinned to `Spectrum Plan 2021`, so the compilation's footer bled into 112 footnote texts and page-bottom document notes entered the table as footnotes 2, 3, 4, …; refs are now gated on font size (12 pt vs the 6.5 pt superscript) and the pattern is edition-agnostic. Refs set hard against their text (`228AAThe use of…`) are matched as a word prefix, recovering 228AA/228AB/286AA and friends, and a candidate whose remainder does not begin a sentence is rejected, which removes the false starts inside multi-column band lists.
 - **`tests/get_frequency_allocation.test.ts` creates its indexes.** `for (const idx of (meta as any).indexes ?? [])` iterated a property that does not exist — `TABLE_METADATA` exposes `post_load_ddl`, a string — so the range index the lookup depends on was never created in the test DB, and the `as any` hid it from the type checker.
+- **`npm run test:integration` no longer appears to hang.** The suite spawns the server via `npx`, which forks `node` as a grandchild; `serverProcess.kill()` signalled only the `npx` wrapper, leaving the server holding port 3001 so jest never exited ("Jest did not exit one second after the test run has completed"). The tests had already passed in ~8 s, but the command sat for minutes and left an orphan listening on 3001. The server is now spawned `detached` and torn down by process group.
 - `tools/extract-rrsp/audit.py` retired: its line-count heuristic passed on data with ~200 bad rows (`return 0 if suspicious < 200 else 1`), and line joining now makes raw-lines-vs-services a meaningless ratio. The extractor's own reporting and `tests/seed_invariants.test.ts` cover it precisely.
 - ITU region lookup sorts before `LIMIT 1` instead of returning an arbitrary overlapping row.
 - Remaining `console.error` diagnostics in `src/spectrum_plan.ts` and `src/import_spectrum_plan.ts` routed through `src/logger.ts`, completing the 1.9.0 conversion.

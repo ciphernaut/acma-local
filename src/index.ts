@@ -480,7 +480,7 @@ function openDb() {
 
 function createServer(): Server {
     const server = new Server(
-        { name: 'acma-rrl-server', version: '1.10.0' },
+        { name: 'acma-rrl-server', version: '1.11.0' },
         { capabilities: { tools: {} } }
     );
 
@@ -1150,7 +1150,7 @@ async function main() {
         const status = getSyncStatus();
         const body: Record<string, unknown> = {
             status: 'ok',
-            version: '1.10.0',
+            version: '1.11.0',
             ...(status.dataAsOf !== undefined ? { dataAsOf: status.dataAsOf } : {}),
             ...(status.lastSyncAt !== undefined ? { lastSyncAt: status.lastSyncAt } : {}),
             ...(status.remoteAsOf !== undefined ? { remoteAsOf: status.remoteAsOf } : {}),
@@ -1227,7 +1227,7 @@ async function main() {
 
     const port = Number(PORT);
     const httpServer = app.listen(port, '0.0.0.0', () => {
-        log.info(`ACMA RRL MCP Server v1.10.0 running on port ${port} at http://localhost:${port}/mcp`);
+        log.info(`ACMA RRL MCP Server v1.11.0 running on port ${port} at http://localhost:${port}/mcp`);
         log.info('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query, decode_emission_designator, search_devices_by_emission');
     });
 

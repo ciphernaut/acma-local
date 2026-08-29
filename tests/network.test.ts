@@ -32,9 +32,16 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         }
 
         console.log(`Starting server on port ${PORT}...`);
+        // detached: the server is spawned via `npx`, which forks `node` as a
+        // grandchild.  Killing the npx wrapper alone leaves that node process
+        // holding the port, so jest never exits ("Jest did not exit one second
+        // after the test run has completed") and `npm run test:integration`
+        // looks like it hangs for minutes after the tests have passed.  Its own
+        // process group lets afterAll signal the whole tree.
         serverProcess = spawn('npx', ['tsx', 'src/index.ts'], {
             env: { ...process.env, PORT: String(PORT), ACMA_DB_PATH: testDbPath },
-            stdio: 'pipe'
+            stdio: 'pipe',
+            detached: true,
         });
 
         serverProcess.stderr.on('data', (data: Buffer) => console.error(`[SERVER ERR] ${data}`));
@@ -53,7 +60,12 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
     }, 90000);
 
     afterAll(() => {
-        if (serverProcess) serverProcess.kill();
+        if (serverProcess?.pid) {
+            // Negative pid = the whole process group, so the `node` grandchild
+            // goes down with the `npx` wrapper.
+            try { process.kill(-serverProcess.pid, 'SIGTERM'); }
+            catch { serverProcess.kill(); }
+        }
         if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
     });
 
