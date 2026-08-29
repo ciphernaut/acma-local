@@ -30,7 +30,7 @@ They touch disjoint files, so Loop A and Loop B can run in parallel once Sprint 
 | 2 | Generator & CLI correctness ✅ | #4 #5 #6 #10 #11 | 1 d | S1 | no |
 | 3 | Runtime & upgrade path ✅ | #8 #9 #12 #14 #15 | 0.5 d | — | no |
 | 4 | Extractor arithmetic & page coverage | #3 #2 | 0.5 d | S1, PDF | no |
-| 5 | Service-name reconstruction | #1 | 1–2 d | S1, S4, PDF | **yes** |
+| 5 | Service reconstruction | #1 #16 | 1–2 d | S1, S4, PDF | **yes** |
 | 6 | Region semantics | #7 | 0.5–1 d | S1, PDF | **yes** |
 | 7 | Regenerate, validate, release 1.10.1 | — | 0.5 d | all | no |
 
@@ -73,9 +73,17 @@ Smallest sprint, highest user-visible payoff (#8). Independent of Sprint 2 — d
 
 Clears the Sprint 1 baseline entries for inverted ranges, page 58, and the AU contiguity gap.
 
-### Sprint 5 — Service-name reconstruction
+**Do not simply anchor the range regex.** The obvious fix for #3 — require thousands groups of exactly three digits and match the whole line — rejects 381 of the 1041 distinct first lines in the current seed, because the ITU region columns pack the range and the first service onto one line (`'1 164 – 1 215 AERONAUTICAL RADIONAVIGATION 328'`). Measured, not assumed.
 
-**#1**, the big one. Needs a design decision (below) before implementation.
+The correct shape is to split the range *prefix* off the first line and hand the remainder to `parse_cell` along with the other lines — which is also the fix for #16. So #3 and #16 share a fix site: do the split first (Sprint 5), then tighten the numeric grammar against the isolated prefix, where anchoring is safe and `1 6121.35` can be rejected outright rather than silently reinterpreted.
+
+### Sprint 5 — Service reconstruction
+
+**#1** and **#16**, the big one. Needs a design decision (below) before implementation.
+
+**#16** (found during Sprint 4 prep, see CODE-REVIEW.md): `_build_allocation_row` assumes the frequency range occupies its own line and parses services from `parts[1:]`. In the ITU region columns pdfplumber usually packs the range and the first service onto one line, so that service — normally the band's primary — is discarded. 327 of 810 region rows lose one; many ship `services: []`. Fix: split the range off the first line and feed the remainder to `parse_cell` with the other lines. Baselined as invariant I8.
+
+Both are about reconstructing a cell's services from its lines, so they share a fix site and should land together.
 
 The obvious heuristics don't cover the observed cases: "a line ending in `–` joins the next" handles `RADIONAVIGATION–` + `SATELLITE`, but not `STANDARD FREQUENCY` + `AND TIME SIGNAL`, which is all-caps with no continuation marker. Recommended approach: greedily join lines while the result remains a prefix of a name in the closed ITU service vocabulary (~40 names). That also fixes the `primary` misclassification for free, because classification then runs on the joined name rather than on a lowercase fragment (`_is_primary` is currently called before `name.upper()`).
 

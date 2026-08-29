@@ -71,6 +71,25 @@ The generator writes the file happily; the failure surfaces later as a SQLite sy
 
 Combined with #4 this is reachable via the exact upgrade path in the CHANGELOG. Load into temp tables, or wrap drop+load in a SAVEPOINT.
 
+### 16. The frequency line's own service is discarded — 327 region rows (40%) lose a service
+`tools/extract-rrsp/extract.py:56`
+
+Found while preparing Sprint 4, not in the original review.
+
+`_build_allocation_row` treats `parts[0]` as the frequency range and parses services from `parts[1:]`, assuming the range occupies a line of its own. In the ITU region columns it usually does not — pdfplumber emits the range and the first service together:
+
+```
+'8.3 - 9 METEOROLOGICAL AIDS 54A 54B 54C'   -> services: []
+'11.3 - 14 RADIONAVIGATION'                 -> services: []
+'14 - 19.95 FIXED'                          -> services: ['MARITIME MOBILE']
+```
+
+The trailing text is parsed for the range and then thrown away, so the band's *first* service — normally the primary allocation — never reaches `services_json`. 327 of 810 region rows (40%) are affected; many end up with `services: []`, which a caller reads as "not allocated". `get_frequency_allocation` presents these as the R1/R2/R3 contrast, so the ITU comparison is wrong wherever this fires.
+
+AU rows are unaffected: 0 of 552. The AU column renders the range on its own line.
+
+Covered by invariant I8 with a 327-row baseline (`tests/fixtures/seed_dropped_service_baseline.json`). The fix belongs with Sprint 5, since both it and #1 are about reconstructing a cell's services from its lines.
+
 ---
 
 ## Medium

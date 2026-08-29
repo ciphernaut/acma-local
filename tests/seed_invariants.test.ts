@@ -23,6 +23,7 @@ import { TABLE_METADATA } from '../src/db.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SEED_PATH = path.join(__dirname, '..', 'seed', 'spectrum_plan.sql');
 const FRAGMENT_BASELINE_PATH = path.join(__dirname, 'fixtures', 'seed_fragment_baseline.json');
+const DROPPED_SERVICE_BASELINE_PATH = path.join(__dirname, 'fixtures', 'seed_dropped_service_baseline.json');
 
 const SPECTRUM_TABLE_NAMES = [
     'spectrum_allocations',
@@ -73,6 +74,22 @@ const KNOWN_AU_RANGE_BREAKS: Violation[] = [
 function loadFragmentBaseline(): Violation[] {
     return JSON.parse(fs.readFileSync(FRAGMENT_BASELINE_PATH, 'utf-8')) as Violation[];
 }
+
+/**
+ * #16 — _build_allocation_row() treats the first line of a cell as the
+ * frequency range and parses services from the REST, but pdfplumber often
+ * emits the range and the first service on one line ("8.3 - 9 METEOROLOGICAL
+ * AIDS 54A"), so that service is discarded. 327 region rows, many left with
+ * services: [] which reads as "not allocated".
+ * Cleared by: Sprint 5.
+ */
+function loadDroppedServiceBaseline(): Violation[] {
+    return JSON.parse(fs.readFileSync(DROPPED_SERVICE_BASELINE_PATH, 'utf-8')) as Violation[];
+}
+
+/** A cell's first line: the frequency range, plus anything the PDF packed after it. */
+const RANGE_LINE = /^\s*\d+(?:\s\d+)*(?:\.\d+)?\s*[–-]\s*\d+(?:\s\d+)*(?:\.\d+)?\s*(.*)$/;
+const FOOTNOTE_TOKEN = /\b(?:AUS\d+[A-Z]*|\d{1,3}[A-Z]{0,2})\b/g;
 
 // ─── Exact-multiset violation matching ───────────────────────────────────────
 
@@ -169,6 +186,7 @@ interface AllocRow {
     page: number;
     services_json: string;
     footnotes_json: string;
+    raw: string;
 }
 interface Service {
     name: string;
@@ -181,10 +199,10 @@ let db: Database.Database;
 /** Every allocation row from both tables, region null for the AU table. */
 function allAllocations(): AllocRow[] {
     const au = db.prepare(
-        'SELECT NULL AS region, freq_start_hz, freq_end_hz, page, services_json, footnotes_json FROM spectrum_allocations',
+        'SELECT NULL AS region, freq_start_hz, freq_end_hz, page, services_json, footnotes_json, raw FROM spectrum_allocations',
     ).all() as AllocRow[];
     const region = db.prepare(
-        'SELECT region, freq_start_hz, freq_end_hz, page, services_json, footnotes_json FROM spectrum_region_allocations',
+        'SELECT region, freq_start_hz, freq_end_hz, page, services_json, footnotes_json, raw FROM spectrum_region_allocations',
     ).all() as AllocRow[];
     return [...au, ...region];
 }
@@ -336,6 +354,30 @@ describe('seed invariants', () => {
             au_footnotes: count('spectrum_australian_footnotes'),
             intl_footnotes: count('spectrum_international_footnotes'),
         });
+    });
+
+    test('I8 first-line service text survives into services_json', () => {
+        const violations: Violation[] = [];
+        for (const row of allAllocations()) {
+            const first = row.raw.split('\n').map(l => l.trim()).find(l => l.length > 0) ?? '';
+            const m = RANGE_LINE.exec(first);
+            if (m === null) continue;
+            const trailing = (m[1] ?? '').replace(FOOTNOTE_TOKEN, '').trim();
+            if (trailing === '') continue;
+            const names = (JSON.parse(row.services_json) as Service[]).map(s => s.name).join(' ');
+            if (names.includes(trailing.toUpperCase())) continue;
+            violations.push({
+                table: tableOf(row),
+                region: row.region,
+                freq_start_hz: row.freq_start_hz,
+                freq_end_hz: row.freq_end_hz,
+                dropped: trailing,
+            });
+        }
+        assertExactViolations(
+            'I8 — service text on the frequency line discarded by the extractor',
+            violations, loadDroppedServiceBaseline(), 'Sprint 5 (#16)',
+        );
     });
 
     test('I7 all frequencies within the plan envelope', () => {
