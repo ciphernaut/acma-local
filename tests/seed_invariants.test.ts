@@ -35,35 +35,36 @@ const SPECTRUM_TABLE_NAMES = [
 
 /** Radiocommunications Act envelope: the plan covers 0 Hz – 420 THz. */
 const PLAN_MAX_HZ = 420_000_000_000_000;
-/** Physical PDF pages carrying allocation tables (tools/extract-rrsp/extract.py). */
-const FIRST_ALLOCATION_PAGE = 31;
-const LAST_ALLOCATION_PAGE = 112;
+/**
+ * Physical PDF pages carrying allocation tables.  These moved with the rebase to
+ * the 2025 compilation (F2025C01105): 31-112 in the 2021 original, 17-106 here.
+ * extract.py discovers them from page text rather than hardcoding them; this
+ * constant only bounds the coverage assertion below.
+ */
+const FIRST_ALLOCATION_PAGE = 17;
+const LAST_ALLOCATION_PAGE = 106;
 
 // ─── Known defects ───────────────────────────────────────────────────────────
 
 /**
- * #3 — frequency.py joins arbitrary space-separated digit runs, so the render
- * artefact "1 6121.35 – 1 626.5" parsed as 16 121.35 MHz → 1 626.5 MHz.
- * Cleared by: Sprint 4.
+ * #3 — CLEARED.  frequency.py now requires thousands groups of exactly three
+ * digits and rejects end <= start, so the render artefact "1 6121.35 – 1 626.5"
+ * no longer parses as 16 121.35 MHz; it is corrected via SOURCE_ERRATA instead.
  */
-const KNOWN_INVERTED_RANGES: Violation[] = [
-    { table: 'spectrum_region_allocations', region: 3, freq_start_hz: 16121350000, freq_end_hz: 1626500000, page: 69 },
-];
+const KNOWN_INVERTED_RANGES: Violation[] = [];
 
 /**
- * #2 — extract.py skips a page whose unit line is unreadable (`if not unit: continue`).
- * Cleared by: Sprint 4.
+ * #2 — CLEARED.  extract.py carries the previous page's unit instead of skipping,
+ * derives column geometry when the header row is absent, and treats the
+ * allocation section as a contiguous span so continuation pages are not lost.
  */
-const KNOWN_MISSING_PAGES: number[] = [58];
+const KNOWN_MISSING_PAGES: number[] = [];
 
 /**
- * #2 (collateral) — the page-58 drop leaves 161.9875–162.0375 MHz, a real VHF
- * marine / land-mobile segment, with no AU allocation.
- * Cleared by: Sprint 4.
+ * #2 (collateral) — CLEARED.  161.9875–162.0375 MHz is allocated again, and the
+ * AU table tiles 0 Hz – 420 THz with no gap or overlap anywhere.
  */
-const KNOWN_AU_RANGE_BREAKS: Violation[] = [
-    { kind: 'gap', prev_end_hz: 161987500, next_start_hz: 162037500 },
-];
+const KNOWN_AU_RANGE_BREAKS: Violation[] = [];
 
 /**
  * #1 — cell_parser.py treats every line as a service, so PDF-wrapped names are
@@ -192,6 +193,7 @@ interface Service {
     name: string;
     primary: boolean;
     inline_footnotes: string[];
+    qualifier?: string;
 }
 
 let db: Database.Database;
@@ -246,7 +248,7 @@ describe('seed invariants', () => {
         assertExactViolations('I1 — inverted or empty frequency ranges', violations, KNOWN_INVERTED_RANGES, 'Sprint 4 (#3)');
     });
 
-    test('I2 every source page 31-112 contributes rows', () => {
+    test('I2 every source allocation page contributes rows', () => {
         const present = new Set<number>(
             allAllocations().map(r => r.page),
         );
@@ -364,8 +366,20 @@ describe('seed invariants', () => {
             if (m === null) continue;
             const trailing = (m[1] ?? '').replace(FOOTNOTE_TOKEN, '').trim();
             if (trailing === '') continue;
-            const names = (JSON.parse(row.services_json) as Service[]).map(s => s.name).join(' ');
-            if (names.includes(trailing.toUpperCase())) continue;
+            // "(Not allocated)" is a marker meaning the band has no services; an
+            // empty services_json is the correct parse, not a dropped service.
+            if (/^\(?not allocated\)?$/i.test(trailing)) continue;
+            // Compare against name AND qualifier: the parser now splits
+            // "AERONAUTICAL MOBILE (R)" into a name and a qualifier, so matching
+            // the raw text against names alone reports every qualified service.
+            // Word-wise containment also tolerates the footnote-stripping above
+            // leaving "( kHz)" behind where the qualifier reads "(20 kHz)".
+            const haystack = (JSON.parse(row.services_json) as Service[])
+                .map(s => `${s.name} ${s.qualifier ?? ''}`)
+                .join(' ')
+                .toUpperCase();
+            const words = trailing.toUpperCase().match(/[A-Z]{2,}/g) ?? [];
+            if (words.length > 0 && words.every(w => haystack.includes(w))) continue;
             violations.push({
                 table: tableOf(row),
                 region: row.region,

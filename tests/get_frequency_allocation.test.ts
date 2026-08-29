@@ -16,7 +16,10 @@ beforeAll(() => {
     ] as const) {
         const meta = TABLE_METADATA[name]!;
         db.exec(meta.ddl);
-        for (const idx of (meta as any).indexes ?? []) db.exec(idx);
+        // post_load_ddl is a string, not an array — the previous
+        // `for (const idx of (meta as any).indexes ?? [])` iterated a property
+        // that does not exist, so the range indexes were never created here.
+        if (meta.post_load_ddl) db.exec(meta.post_load_ddl);
     }
 
     // Seed: one AU row + one R3 row covering the same FM broadcast band, two footnotes.
