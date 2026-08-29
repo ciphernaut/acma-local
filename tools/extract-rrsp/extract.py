@@ -56,17 +56,24 @@ SOURCE_ERRATA: list[dict] = [
         "find": "40.98 – 41.105",
         "contains": "Space research",
         "replace": "40.98 – 41.015",
-        "why": "The 2021 edition (F2021L00617 p51) has 40 980 000-41 015 000 Hz "
-               "with footnotes 160/161 and a Space research entry.",
+        "why": "41.105 appears nowhere else in the compilation; 41.015 is a real "
+               "boundary, named by footnote 161A ('the frequency bands "
+               "41.015-41.665 MHz and 43.35-44 MHz') which the NEXT cell cites. "
+               "The 2021 edition (F2021L00617 p51) also has 40.98-41.015 with "
+               "footnotes 160/161 and a Space research entry.  Confirmed against "
+               "the amending instrument F2025L01230, which carries the same typo.",
     },
     {
         "page": 37,
         "find": "40.98 – 41.105",
         "contains": "161A",
         "replace": "41.015 – 42",
-        "why": "The PDF repeats the previous band's range here.  The 2021 edition "
-               "(F2021L00617 p51) has 41 015 000-42 000 000 Hz with footnotes "
-               "160/161/161A and no Space research entry.",
+        "why": "The PDF repeats the previous band's range here.  The band that "
+               "follows is 42-44, so this cell must end at 42; footnote 161A, "
+               "cited here, starts at 41.015.  The 2021 edition (F2021L00617 p51) "
+               "has 41.015-42 with footnotes 160/161/161A and no Space research "
+               "entry.  Confirmed against the amending instrument F2025L01230, "
+               "which carries the same typo as made.",
     },
     {
         "page": 105,
