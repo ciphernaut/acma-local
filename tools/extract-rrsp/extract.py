@@ -9,6 +9,7 @@ Sections are discovered from page text, not hardcoded — they moved between the
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
 import sys
@@ -18,10 +19,15 @@ import pdfplumber
 from ruamel.yaml import YAML
 
 from cell_parser import parse_cell, UNMATCHED
+from vocabulary import SERVICE_NAMES
 from footnotes import is_running_header
 from frequency import split_range_prefix
 
 EXTRACTOR_VERSION = "2.0.0"
+
+# The vocabulary is generated from ACMA's spreadsheet edition of the table; its
+# hash is recorded in the output so the whole input set is pinned, not just the PDF.
+VOCABULARY_SOURCE = "docs/Table of Frequency Band Allocations xlsx.xlsx"
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUTPUT_YAML = REPO_ROOT / "seed" / "spectrum_plan_source.yaml"
@@ -94,6 +100,23 @@ def _find_erratum(page: int, cell_text: str) -> dict | None:
             continue
         return e
     return None
+
+
+def _extracted_at() -> str:
+    """UTC now, or SOURCE_DATE_EPOCH when set.
+
+    The timestamp is the only non-deterministic field in the output, so pinning it
+    makes the whole extract byte-reproducible:
+
+        SOURCE_DATE_EPOCH=1760000000 python extract.py <pdf>
+    """
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    when = (
+        datetime.fromtimestamp(int(epoch), timezone.utc)
+        if epoch
+        else datetime.now(timezone.utc)
+    )
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -515,6 +538,11 @@ def main(pdf_path: pathlib.Path) -> None:
     pdf_sha = _sha256(pdf_path)
     print(f"SHA256:  {pdf_sha}")
 
+    vocab_path = REPO_ROOT / VOCABULARY_SOURCE
+    vocab_sha = _sha256(vocab_path) if vocab_path.exists() else None
+    if vocab_sha is None:
+        print(f"  ! {VOCABULARY_SOURCE} is absent; vocabulary provenance not recorded")
+
     with pdfplumber.open(pdf_path) as pdf:
         sections = _find_sections(pdf)
         print(
@@ -532,13 +560,42 @@ def main(pdf_path: pathlib.Path) -> None:
             "source": {
                 "title": "Australian Radiofrequency Spectrum Plan (2025 Update) 2021",
                 "subtitle": "Compilation No. 1, including F2025L01230",
-                "url": "https://www.legislation.gov.au/F2021L00617/latest/text",
+                "url": "https://www.legislation.gov.au/F2025C01105",
                 "pdf_sha256": pdf_sha,
                 "pdf_published": "2025-10-09",
                 "compilation": "F2025C01105",
+                "principal_instrument": "F2021L00617",
+                "amending_instruments": ["F2025L01230"],
+                "series": "https://www.legislation.gov.au/Series/F2021L00617",
             },
-            "extracted_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "extracted_at": _extracted_at(),
             "extractor_version": EXTRACTOR_VERSION,
+            "toolchain": {
+                "python": ".".join(str(v) for v in sys.version_info[:3]),
+                "pdfplumber": pdfplumber.__version__,
+            },
+            "vocabulary": {
+                "names": len(SERVICE_NAMES),
+                "source": VOCABULARY_SOURCE,
+                "sha256": vocab_sha,
+            },
+            "sections": {
+                "allocations": _span(sections["allocations"]),
+                "au_footnotes": _span(sections["au_footnotes"]),
+                "intl_footnotes": _span(sections["intl_footnotes"]),
+            },
+            # Every correction applied to the source text, carried into the seed so
+            # a reader of the DATA can see what was changed and why without
+            # reading the extractor.
+            "errata": [
+                {
+                    "page": e["page"],
+                    "find": e["find"],
+                    "replace": e["replace"],
+                    "why": " ".join(e["why"].split()),
+                }
+                for e in SOURCE_ERRATA
+            ],
         },
         "au_allocations": au_rows,
         "region_allocations": region_rows,

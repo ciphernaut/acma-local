@@ -1,14 +1,27 @@
-# RRSP 2021 Extractor
+# RRSP Extractor
 
-Parses the Australian Radiofrequency Spectrum Plan 2021 (PDF) into
+> Provenance, the reproduction recipe, expected row counts, and the source-document
+> errata with their evidence: [`docs/spectrum-provenance.md`](../../docs/spectrum-provenance.md).
+
+Parses the Australian Radiofrequency Spectrum Plan (PDF) into
 `seed/spectrum_plan_source.yaml`. This YAML is the canonical source for the
 `spectrum_*` SQLite tables; the SQL seed is generated from it.
 
+Section page ranges are discovered from page text, so the extractor is not tied
+to one edition — but the errata below are, since they name exact strings on exact
+pages.
+
 ## Source PDF
 
-- URL: <https://www.acma.gov.au/sites/default/files/2021-07/Australian%20Radiofrequency%20Spectrum%20Plan%202021_Including%20general%20information.pdf>
-- SHA256: `074e71a752eaa86ffaca002401849baf5018dc07647330a6f4d5796321375aa4`
-- The PDF is not committed to this repository. Download it locally before running.
+- Compilation: `F2025C01105` (Compilation No. 1, 9 Oct 2025, incorporating
+  `F2025L01230` / WRC-23) — <https://www.legislation.gov.au/F2025C01105>
+- SHA256: `5c22bd127b930fb85ad52ce5e9b8a039976d400edd07ec87488c51aeda8edc59`
+- The PDF is not committed to this repository. Download it locally before running,
+  and check the hash — the extractor prints the hash of whatever it is given.
+
+The previous baseline, ARSP 2021 as made (`F2021L00617`, SHA256
+`074e71a752eaa86ffaca002401849baf5018dc07647330a6f4d5796321375aa4`), ceased to be
+in force on 8 October 2025.
 
 ## Run
 

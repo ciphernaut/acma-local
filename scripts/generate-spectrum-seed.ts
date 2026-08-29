@@ -37,6 +37,11 @@ export interface SourceDoc {
         source: Record<string, unknown>;
         extracted_at: string;
         extractor_version: string;
+        /** Provenance, all optional so an older source YAML still generates. */
+        toolchain?: Record<string, unknown>;
+        vocabulary?: Record<string, unknown>;
+        sections?: Record<string, unknown>;
+        errata?: Array<Record<string, unknown>>;
     };
     au_allocations: Allocation[];
     region_allocations: Allocation[];
@@ -222,6 +227,26 @@ export function generateSeedSql(doc: SourceDoc, opts: { lastPatchDate?: string }
         ['extractor_version', meta.extractor_version],
         ['row_counts', JSON.stringify(rowCounts)],
     ];
+
+    // Provenance travels with the DATA, not just with the extractor: anyone
+    // holding only the database can see which instrument it came from, which
+    // inputs were hashed, which pages were read, and every correction applied to
+    // the source text with its reasoning.  See docs/spectrum-provenance.md.
+    const provenance: Array<[string, unknown]> = [
+        ['source_url', source.url],
+        ['source_compilation', source.compilation],
+        ['source_principal_instrument', source.principal_instrument],
+        ['source_amending_instruments', source.amending_instruments],
+        ['source_series_url', source.series],
+        ['toolchain', meta.toolchain],
+        ['vocabulary', meta.vocabulary],
+        ['sections', meta.sections],
+        ['errata', meta.errata],
+    ];
+    for (const [key, value] of provenance) {
+        if (value === undefined || value === null) continue;
+        metaPairs.push([key, typeof value === 'string' ? value : JSON.stringify(value)]);
+    }
     // Read back by readSourceMeta() and surfaced in get_frequency_allocation's
     // staleness warning; absent when no overlay has been applied.
     if (opts.lastPatchDate) {

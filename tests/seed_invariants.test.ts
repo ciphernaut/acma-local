@@ -337,7 +337,7 @@ describe('seed invariants', () => {
         assertExactViolations('I5 — footnote refs with no matching footnote row', dangling, [], 'a fix');
     });
 
-    test('I6 meta keys present and row_counts accurate', () => {
+    test('I6 meta, provenance and row_counts', () => {
         const meta = new Map<string, string>(
             (db.prepare('SELECT key, value FROM spectrum_plan_meta').all() as Array<{ key: string; value: string }>)
                 .map(r => [r.key, r.value]),
@@ -346,6 +346,32 @@ describe('seed invariants', () => {
         // (#6). Assert it here once Sprint 2 lands, guarded on seed/patches/.
         for (const key of ['generation', 'source_title', 'published_date', 'pdf_sha256', 'imported_at', 'extractor_version', 'row_counts']) {
             expect(meta.get(key)).toBeTruthy();
+        }
+
+        // Provenance: the seed must be traceable to its inputs and its
+        // departures from them without reference to this repo.
+        // See docs/spectrum-provenance.md.
+        for (const key of [
+            'source_url', 'source_compilation', 'source_principal_instrument',
+            'source_amending_instruments', 'toolchain', 'vocabulary', 'sections', 'errata',
+        ]) {
+            expect(meta.get(key)).toBeTruthy();
+        }
+        expect(JSON.parse(meta.get('vocabulary')!)).toMatchObject({
+            source: expect.any(String),
+            sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        });
+        expect(meta.get('pdf_sha256')).toMatch(/^[0-9a-f]{64}$/);
+
+        // Every correction applied to the source text carries its reasoning, so a
+        // reader of the DATA can see what was changed and why.
+        const errata = JSON.parse(meta.get('errata')!) as Array<Record<string, string>>;
+        expect(errata.length).toBeGreaterThan(0);
+        for (const e of errata) {
+            expect(e.page).toEqual(expect.any(Number));
+            expect(e.find).toBeTruthy();
+            expect(e.replace).toBeTruthy();
+            expect(e.why!.length).toBeGreaterThan(40);
         }
 
         const count = (t: string): number =>

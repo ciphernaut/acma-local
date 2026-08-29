@@ -9,7 +9,7 @@ The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) an
 - **Local mirror** of the full RRL dataset (32 materialised tables + FTS5 narrative index), kept fresh by ACMA's `/v1/Extracts` manifest API — mobile-friendly by default (no automatic 70 MB downloads).
 - **Full-text search** (SQLite FTS5) over application narrative — answers "which licences mention 'remote operation'?" in milliseconds.
 - **Geospatial export** — site/device results carry coordinates and can be rendered as KML via `export_kml`.
-- **Spectrum plan lookup** — `get_frequency_allocation(freq_hz)` returns the AU primary allocation plus ITU Region 1/2/3 contrast rows and resolved footnote text. Data rebuilt from the 2021 ACMA Spectrum Plan PDF; seeded from `seed/spectrum_plan.sql`.
+- **Spectrum plan lookup** — `get_frequency_allocation(freq_hz)` returns the AU primary allocation plus ITU Region 1/2/3 contrast rows and resolved footnote text. Rebuilt from the 2025 compilation of the ACMA Spectrum Plan (`F2025C01105`); seeded from `seed/spectrum_plan.sql`. See [`docs/spectrum-provenance.md`](docs/spectrum-provenance.md) to reproduce the seed or to review where it departs from the source document and why.
 - **Power-user SQL** — `execute_sql` runs sandboxed SELECT/WITH queries in a worker thread; `explain_query`, `describe_schema`, and `list_sample_queries` make the schema discoverable.
 - **Progressive disclosure** — `tools/list` returns terse one-liners; `describe_tool(<name>)` fetches the full markdown when needed (matterfront pattern).
 
@@ -68,7 +68,7 @@ The Australian Radiofrequency Spectrum Plan is stored in five `spectrum_*` table
 - `spectrum_region_allocations` — ITU Region 1/2/3 allocations keyed independently of AU sub-range boundaries.
 - `spectrum_australian_footnotes`, `spectrum_international_footnotes`, `spectrum_plan_meta`.
 
-**Source pipeline.** The canonical source is `seed/spectrum_plan_source.yaml`, extracted from the 2021 ACMA Spectrum Plan PDF by `tools/extract-rrsp/extract.py`. `seed/spectrum_plan.sql` is generated from the YAML plus any overlays in `seed/patches/*.yaml` by `scripts/generate-spectrum-seed.ts`. On a fresh DB, the seed is auto-applied at the tail of `performFullSync`.
+**Source pipeline.** The canonical source is `seed/spectrum_plan_source.yaml`, extracted from the ACMA Spectrum Plan PDF — currently compilation `F2025C01105` — by `tools/extract-rrsp/extract.py`. The rebuild is byte-reproducible and the chain from published law to shipped SQL, including where the seed departs from the source document, is documented in [`docs/spectrum-provenance.md`](docs/spectrum-provenance.md). `seed/spectrum_plan.sql` is generated from the YAML plus any overlays in `seed/patches/*.yaml` by `scripts/generate-spectrum-seed.ts`. On a fresh DB, the seed is auto-applied at the tail of `performFullSync`.
 
 **`get_frequency_allocation` response shape.** Returns `allocation` (AU primary row, nullable), `regions` (R1/R2/R3 contrast rows, each nullable), `resolved_footnotes` (flat text map for all referenced AU and international footnotes), and `source` (with `published_date` and `last_patch_date`).
 
