@@ -20,9 +20,20 @@ uv pip install --python .venv -r tools/extract-rrsp/requirements.txt
 
 .venv/bin/python tools/extract-rrsp/extract.py docs/<source>.pdf
 # Writes ../../seed/spectrum_plan_source.yaml
+```
 
-python audit.py ../../seed/spectrum_plan_source.yaml
-# Prints any allocation cells whose `raw` field still contains un-decomposed line-soup.
+The run reports everything it could not handle cleanly — pages with no unit banner
+or column header, cells with no parsable frequency range, service names outside the
+vocabulary, coverage gaps and duplicated bands, and each `SOURCE_ERRATA` entry that
+fired or failed to fire. Nothing is dropped silently. `audit.py` (a line-count
+heuristic that tolerated ~200 bad rows) was retired in favour of this reporting plus
+the shipped-data gate in `tests/seed_invariants.test.ts`.
+
+The service vocabulary is generated, not hand-written:
+
+```bash
+.venv/bin/python tools/extract-rrsp/gen_vocabulary.py \
+    "docs/Table of Frequency Band Allocations xlsx.xlsx"
 ```
 
 ## Tests

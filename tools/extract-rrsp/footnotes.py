@@ -1,8 +1,7 @@
 """Extract footnote dictionaries from raw PDF page text.
 
-Australian footnotes (pages 112–119): refs match AUS\\d+[A-Z]*.
-International footnotes (pages 120–214): refs match \\d{1,3}[A-Z]{0,2}.
-Running headers and footers are dropped.
+Australian footnote refs match AUS\\d+[A-Z]*; international refs match
+\\d{1,3}[A-Z]{0,2}.  Running headers and footers are dropped.
 """
 
 from __future__ import annotations
@@ -20,9 +19,14 @@ class Footnote(TypedDict):
 _AUS_REF = re.compile(r"^(AUS\d+[A-Z]*)(.*)$")
 _INTL_REF = re.compile(r"^(\d{1,3}[A-Z]{0,2})\s+(.+)$")
 _PAGE_NUMBER_ONLY = re.compile(r"^\s*\d+\s*$")
+# Edition-agnostic: the running footer reads "Australian Radiofrequency Spectrum
+# Plan 2021" in the original and "... (2025 Update) 2021" in the compilation.
+# Pinning the year let the 2025 footer bleed into 112 footnote texts.
 _HEADER_PATTERNS = [
-    re.compile(r"^Australian Radiofrequency Spectrum Plan 2021", re.IGNORECASE),
+    re.compile(r"^Australian Radiofrequency Spectrum Plan\b", re.IGNORECASE),
     re.compile(r"^Part\s+\d+\s+", re.IGNORECASE),
+    re.compile(r"^Compilation No\.", re.IGNORECASE),
+    re.compile(r"^Registered:", re.IGNORECASE),
 ]
 
 

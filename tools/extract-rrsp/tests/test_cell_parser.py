@@ -67,3 +67,79 @@ def test_empty_input():
 def test_lowercase_aus_token_is_uppercased():
     result = parse_cell(cells.LOWERCASE_AUS_TOKEN)
     assert result["services"][0]["inline_footnotes"] == ["AUS49"]
+
+
+# --- line joining (findings #1, #16) ---------------------------------------
+
+
+def test_wrapped_name_rejoined_and_stays_primary():
+    """The PDF wraps 'RADIONAVIGATION-SATELLITE' mid-word.  Generation 2 emitted
+    'RADIONAVIGATION-' and 'SATELLITE (SPACE-TO-' as separate services and marked
+    the second secondary, because it tested the case of a fragment."""
+    result = parse_cell(
+        "AERONAUTICAL\nRADIONAVIGATION\nRADIONAVIGATION–\n"
+        "SATELLITE (space-to-\nEarth) (space-to-space)\n208B 328B"
+    )
+    assert result["services"] == [
+        {"name": "AERONAUTICAL RADIONAVIGATION", "primary": True, "inline_footnotes": []},
+        {
+            "name": "RADIONAVIGATION-SATELLITE",
+            "primary": True,
+            "inline_footnotes": [],
+            "qualifier": "(space-to-Earth) (space-to-space)",
+        },
+    ]
+    assert result["footnotes"] == ["208B", "328B"]
+
+
+def test_vocabulary_prefix_join():
+    result = parse_cell("STANDARD FREQUENCY\nAND TIME SIGNAL")
+    assert [s["name"] for s in result["services"]] == [
+        "STANDARD FREQUENCY AND TIME SIGNAL"
+    ]
+
+
+def test_lowercase_continuation_is_not_a_new_service():
+    result = parse_cell("MOBILE except aeronautical\nmobile")
+    assert result["services"] == [
+        {
+            "name": "MOBILE",
+            "primary": True,
+            "inline_footnotes": [],
+            "qualifier": "except aeronautical mobile",
+        }
+    ]
+
+
+def test_parenthetical_line_attaches_as_qualifier():
+    result = parse_cell("STANDARD FREQUENCY AND TIME SIGNAL\n(20 kHz)")
+    assert len(result["services"]) == 1
+    assert result["services"][0]["qualifier"] == "(20 kHz)"
+    # The 20 in "(20 kHz)" is part of the qualifier, not a footnote reference.
+    assert result["services"][0]["inline_footnotes"] == []
+    assert result["footnotes"] == []
+
+
+def test_second_direction_repeats_the_service_name():
+    """FIXED-SATELLITE with two directions, split by a footnote continuation line."""
+    result = parse_cell(
+        "FIXED\nFIXED–SATELLITE\n(space-to-Earth) 484A\n517A 517B\n"
+        "(Earth-to-space) 516\nMOBILE\nAUS87"
+    )
+    assert [(s["name"], s.get("qualifier")) for s in result["services"]] == [
+        ("FIXED", None),
+        ("FIXED-SATELLITE", "(space-to-Earth)"),
+        ("FIXED-SATELLITE", "(Earth-to-space)"),
+        ("MOBILE", None),
+    ]
+    assert result["services"][1]["inline_footnotes"] == ["484A", "517A", "517B"]
+    assert result["services"][2]["inline_footnotes"] == ["516"]
+    assert result["footnotes"] == ["AUS87"]
+
+
+def test_unknown_name_is_recorded_not_silently_kept():
+    from cell_parser import UNMATCHED
+
+    before = UNMATCHED.copy()
+    parse_cell("DEFINITELY NOT A SERVICE")
+    assert UNMATCHED["DEFINITELY NOT A SERVICE"] == before["DEFINITELY NOT A SERVICE"] + 1
