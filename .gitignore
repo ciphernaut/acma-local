@@ -16,3 +16,5 @@ compare/
 offline_rrl*.js
 docs/superpowers/
 
+.venv/
+docs/*.pdf

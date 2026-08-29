@@ -12,13 +12,13 @@ Parses the Australian Radiofrequency Spectrum Plan 2021 (PDF) into
 
 ## Run
 
-```bash
-cd tools/extract-rrsp
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+Python packages are managed with [uv](https://docs.astral.sh/uv/).
 
-python extract.py /path/to/Australian\ Radiofrequency\ Spectrum\ Plan\ 2021_Including\ general\ information.pdf
+```bash
+uv venv                                   # from the repo root
+uv pip install --python .venv -r tools/extract-rrsp/requirements.txt
+
+.venv/bin/python tools/extract-rrsp/extract.py docs/<source>.pdf
 # Writes ../../seed/spectrum_plan_source.yaml
 
 python audit.py ../../seed/spectrum_plan_source.yaml

@@ -29,10 +29,9 @@ They touch disjoint files, so Loop A and Loop B can run in parallel once Sprint 
 | 1 | Seed invariants gate ✅ | — | 0.5 d | — | no |
 | 2 | Generator & CLI correctness ✅ | #4 #5 #6 #10 #11 | 1 d | S1 | no |
 | 3 | Runtime & upgrade path ✅ | #8 #9 #12 #14 #15 | 0.5 d | — | no |
-| 4 | Extractor arithmetic & page coverage | #3 #2 | 0.5 d | S1, PDF | no |
-| 5 | Service reconstruction | #1 #16 | 1–2 d | S1, S4, PDF | **yes** |
-| 6 | Region semantics | #7 | 0.5–1 d | S1, PDF | **yes** |
-| 7 | Regenerate, validate, release 1.10.1 | — | 0.5 d | all | no |
+| 4 | Extractor rewrite — sections, ranges, services, merges | #2 #3 #1 #16 #7 | 2–3 d | S1, PDF | no |
+| 5 | Oracle invariant — agree with the ACMA spreadsheet | — | 0.5 d | S1, S4 | no |
+| 6 | Regenerate, triage diff, release 1.11.0 | — | 0.5 d | all | no |
 
 Total ≈ 5 days sequential; ≈ 3.5 with Loop A and Loop B in parallel.
 
@@ -97,11 +96,83 @@ Alternative: geometry-based continuation detection from pdfplumber word position
 
 Re-extract → bump `EXTRACTOR_VERSION` and YAML `meta.generation` → regenerate SQL → **read the seed diff**. It will be large, so confidence comes from Sprint 1's invariants plus a spot-check of known bands: FM (87.1 MHz), GPS L1 (1575.42 MHz), 2.4 GHz ISM, the 162 MHz marine gap, the 1 621 MHz MSS row. Then 1.10.1 with a changelog note that existing DBs need `--reseed` again.
 
-## Decisions needed
 
-1. **Sprint 5** — vocabulary-driven line joining, or geometry-driven? Vocabulary is more robust for this document and gives the `primary` fix for free; geometry generalises to future editions.
-2. **Sprint 6** — does `regions[n] === null` mean "no ITU allocation" or "merged with Region 1"? This is a tool-contract change either way.
-3. **Sprint 7** — ship the data fix as 1.10.1, or hold for a re-extraction against a newer ACMA edition if one exists?
+## Source document change (2025 compilation)
+
+`docs/F2025C01105.pdf` is **not** the 2021 baseline. It is:
+
+> Australian Radiofrequency Spectrum Plan (**2025 Update**) 2021 — Compilation No. 1,
+> compilation date 9 October 2025, including amendment F2025L01230, registered 26/11/2025.
+> SHA-256 `5c22bd127b930fb85ad52ce5e9b8a039976d400edd07ec87488c51aeda8edc59`, 221 pages.
+
+The YAML pins `074e71a7…` (the 2021 original), so this supersedes the baseline rather than reproducing it — it is the current law, and better data than what ships today.
+
+**Rebasing to it is a product decision, not just a bug fix.** Consequences:
+
+- `meta.generation` goes to 3; the shipped allocations change wholesale.
+- Every Sprint-1 baseline (I1–I8) is keyed to the *current* seed and resets. The invariants stop being characterisation baselines and become straight pass/fail on real properties — the intended endgame, but it means **extractor fixes can no longer be verified by a clean seed diff**: legislative changes and parser fixes would arrive in the same diff. If the 2021 PDF can be obtained, extract it first with the fixed extractor to separate the two effects; otherwise verification rests on the invariants plus band spot-checks.
+- `published_date` becomes 2025-10-09, so `get_frequency_allocation`'s ≥3-year staleness warning correctly stops firing.
+- Overlays in `seed/patches/` reset against the new generation (there are none today).
+
+### The hardcoded page ranges are all wrong for it
+
+| Section | `extract.py` assumes | Actual in F2025C01105 |
+|---|---|---|
+| Allocation tables | 31–112 | **17–106** |
+| Australian footnotes | 112–119 | **107–113** |
+| International footnotes | 120–214 | **114–218** |
+
+Running the extractor as-is against this PDF would read AU-footnote pages as allocation tables. Sprint 4 must **discover** the sections from page text, not hardcode them — which is the same "never skip silently" theme as #2.
+
+### Measured merge behaviour (623 rows, pages 17–106)
+
+| Shape | Rows |
+|---|---|
+| One cell spanning R1–R3 (R1 holds the text, R2/R3 `None`) | **404 (65%)** |
+| Row with its own R3 cell | 114 |
+| Row with an empty AU cell (vertical merge candidate) | 68 |
+| Row with an empty R1 cell | 72 |
+
+The current extractor attributes every merged cell to region 1 alone, so **R3 is missing about 65% of its allocations** — the mechanism behind #7, and why 2 400 MHz returns `regions[3]: null`.
+
+The same probe shows why #16 splits by column: in a merged row R1 packs the range and first service onto one line (`'1 710 – 1 930 FIXED\nMOBILE 384A…'`) while the AU cell puts them on separate lines (`'1 710 – 1 930\nFIXED\n…'`). Both forms occur, so the fix must split the range prefix off the first line and fall through to the next line when the remainder is empty.
+
+### Decision — region semantics (resolved)
+
+`regions[n] === null` is a **bug, not a contract**. The measurement above settles it: 65% of rows are a single cell spanning R1–R3, so the nulls are dropped data, not "no allocation in that region". Horizontal merges propagate the merged content to every region they span; vertical merges propagate down the frequency rows they cover. The response shape is unchanged and `src/index.ts:305`'s "R1/R2 contrast" wording stays accurate — the field simply becomes correct. No `same_as_region_1` marker.
+
+### Toolchain
+
+Python packages are managed with **uv**; `uv` reaches PyPI from this environment, so Loop B is unblocked:
+
+```bash
+uv venv && uv pip install --python .venv -r tools/extract-rrsp/requirements.txt
+```
+
+The source PDF stays out of git (`.gitignore`), with its SHA-256 pinned in the YAML `meta` block, per existing convention.
+
+## Decisions — all resolved
+
+1. **Rebase to the 2025 compilation — yes.** `F2021L00617` ceased to be in force on 8 October 2025, so the shipped seed states superseded law; that makes the rebase forced rather than optional. The verification cost is covered by the oracle below: a seed diff hunk is either in `F2025L01230`'s 259 amendment items, in the spreadsheet's agreement set, or a parser bug.
+2. **Service reconstruction — vocabulary-driven.** The closed vocabulary is no longer something to hand-write: the oracle's `Service Name` column supplies all 30 names, already normalised. Greedily join lines while the result is a prefix of a known name. Fixes #1 and the `primary` misclassification together; #16 falls out of the same range-prefix split.
+3. **Region null semantics — propagate merges** (see above).
+4. **Version — 1.11.0, not 1.10.1.** The underlying law changed, not just the parser.
+
+## Validation oracle — `docs/Table of Frequency Band Allocations xlsx.xlsx`
+
+ACMA's own spreadsheet edition of the table: 1,566 rows, one per (band, service), with an explicit `Status` column (PRIMARY/secondary), direction qualifiers split into `Additional Notes`, and footnote refs per row. 549 bands, zero overlaps, zero fragmented names — it is the structured form the extractor has been trying to reconstruct, and it covers 161.9875–162.0375 MHz (the band lost with the page-58 skip) and gives GPS L1 as a single correct primary `RADIONAVIGATION - SATELLITE` row.
+
+**It is not a source.** Internal mtime 2018-08-01, pre-WRC-19 boundaries (51.4–52.6 GHz where the 2021 seed has 51.4–52.4), so it is the ARSP 2017 table — one edition behind the baseline, two behind current law. ACMA retired it in the 2019 CMS migration; the Wayback Machine holds a single capture (24 March 2019) byte-identical to the copy in `docs/`, and there are no other revisions to diff.
+
+**It is an oracle.** 542 of ~550 band boundaries already match the 2021 seed. Where the extractor and the spreadsheet agree on a band untouched by WRC-19/23, the parse is right; where they disagree, it is either a real legislative change or a parser bug — a far smaller set to triage than a 29k-line seed diff. Its `Footnote lookup` sheet (2,381 applicability rows over 709 refs, 873 service-scoped, with R1/R2/R3/Aus flags) has no equivalent in the seed at all.
+
+## Instrument history
+
+| Instrument | Made | In force |
+|---|---|---|
+| `F2021L00617` — ARSP 2021 | 20 May 2021 | 24 May 2021 – 8 Oct 2025 |
+| `F2025L01230` — Variation 2025 (No. 1) | — | Schedule 1, items 1–259 (WRC-23) |
+| `F2025C01105` — Compilation 1 | 9 Oct 2025 | current |
 
 ## Hotfix path
 
