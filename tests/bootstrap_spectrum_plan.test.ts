@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TABLE_METADATA } from '../src/db.js';
-import { bootstrapSpectrumPlan, resetSpectrumTables, spectrumSchemaIsLegacy, execSeedSql } from '../src/spectrum_plan.js';
+import { bootstrapSpectrumPlan, resetSpectrumTables, spectrumSchemaIsLegacy, execSeedSql, reseedFromSql } from '../src/spectrum_plan.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -243,6 +243,38 @@ describe('bootstrapSpectrumPlan', () => {
              HAVING n > 1`
         ).all() as Array<{ footnote_ref: string; n: number }>;
         expect(rows).toHaveLength(0);
+        db.close();
+    });
+});
+
+describe('reseedFromSql', () => {
+    const ROW = `INSERT INTO spectrum_allocations(freq_start_hz, freq_end_hz, unit, page, services_json, footnotes_json, raw)`;
+
+    test('a failing seed leaves the existing data in place', () => {
+        const db = freshSpectrumDb();
+        db.exec(`${ROW} VALUES(1, 2, 'Hz', 1, '[]', '[]', 'existing');`);
+
+        expect(() => reseedFromSql(db, [
+            'BEGIN TRANSACTION;',
+            `${ROW} VALUES(5, 6, 'Hz', 1, '[]', '[]', 'replacement');`,
+            'INSERT INTO no_such_table(x) VALUES(1);',
+            'COMMIT;',
+        ].join('\n'))).toThrow();
+
+        // The DROP/CREATE must roll back with the load — otherwise a bad seed
+        // empties a working database.
+        const rows = db.prepare('SELECT raw FROM spectrum_allocations').all() as Array<{ raw: string }>;
+        expect(rows).toEqual([{ raw: 'existing' }]);
+        expect(db.inTransaction).toBe(false);
+        db.close();
+    });
+
+    test('a good seed replaces the data', () => {
+        const db = freshSpectrumDb();
+        db.exec(`${ROW} VALUES(1, 2, 'Hz', 1, '[]', '[]', 'existing');`);
+        reseedFromSql(db, `BEGIN TRANSACTION;\n${ROW} VALUES(5, 6, 'Hz', 1, '[]', '[]', 'replacement');\nCOMMIT;\n`);
+        const rows = db.prepare('SELECT raw FROM spectrum_allocations').all() as Array<{ raw: string }>;
+        expect(rows).toEqual([{ raw: 'replacement' }]);
         db.close();
     });
 });

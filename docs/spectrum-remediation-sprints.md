@@ -26,15 +26,17 @@ They touch disjoint files, so Loop A and Loop B can run in parallel once Sprint 
 
 | # | Sprint | Findings | Est. | Depends on | Blocked by a decision? |
 |---|---|---|---|---|---|
-| 1 | Seed invariants gate | — | 0.5 d | — | no |
-| 2 | Generator & CLI correctness | #4 #5 #6 #10 #11 | 1 d | S1 | no |
-| 3 | Runtime & upgrade path | #8 #9 #12 #14 #15 | 0.5 d | — | no |
+| 1 | Seed invariants gate ✅ | — | 0.5 d | — | no |
+| 2 | Generator & CLI correctness ✅ | #4 #5 #6 #10 #11 | 1 d | S1 | no |
+| 3 | Runtime & upgrade path ✅ | #8 #9 #12 #14 #15 | 0.5 d | — | no |
 | 4 | Extractor arithmetic & page coverage | #3 #2 | 0.5 d | S1, PDF | no |
 | 5 | Service-name reconstruction | #1 | 1–2 d | S1, S4, PDF | **yes** |
 | 6 | Region semantics | #7 | 0.5–1 d | S1, PDF | **yes** |
 | 7 | Regenerate, validate, release 1.10.1 | — | 0.5 d | all | no |
 
 Total ≈ 5 days sequential; ≈ 3.5 with Loop A and Loop B in parallel.
+
+**Status:** Sprints 1-3 are done on `fix/spectrum-remediation` (Loop A complete). Sprints 4-7 remain and need `pip install pdfplumber` plus the source PDF.
 
 ### Sprint 1 — Seed invariants gate
 

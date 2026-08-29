@@ -134,6 +134,26 @@ export function execSeedSql(db: BetterSqlite3Database, sql: string): void {
 }
 
 /**
+ * Replace the spectrum tables from a generated seed, atomically.
+ *
+ * SQLite's DDL is transactional, so the DROP/CREATE rolls back together with
+ * the load: a seed that fails to apply leaves the previous data in place
+ * rather than emptying the tables of a working database.
+ */
+export function reseedFromSql(db: BetterSqlite3Database, sql: string): void {
+    const savepoint = 'spectrum_reseed';
+    db.exec(`SAVEPOINT ${savepoint}`);
+    try {
+        resetSpectrumTables(db);
+        execSeedSql(db, sql);
+        db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    } catch (e) {
+        db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
+        throw e;
+    }
+}
+
+/**
  * Returns true if spectrum_allocations exists but has the old column layout
  * (pre-Task-9 schema: frequency_range TEXT or region1 TEXT columns).
  */
@@ -315,9 +335,8 @@ export function applyReseed(db: BetterSqlite3Database, sourcePath: string): void
     if (ext !== '.sql') {
         throw new Error(`applyReseed: only .sql sources are supported in the new pipeline. Got: ${sourcePath}`);
     }
-    resetSpectrumTables(db);
     const sql = fs.readFileSync(sourcePath, 'utf-8');
-    execSeedSql(db, sql);
+    reseedFromSql(db, sql);
     const now = new Date().toISOString();
     db.prepare('INSERT OR REPLACE INTO spectrum_plan_meta(key, value) VALUES(?, ?)').run('imported_at', now);
     log.info(`[SPECTRUM] Reseeded from ${sourcePath}`);
