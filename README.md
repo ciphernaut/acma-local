@@ -153,7 +153,23 @@ Sync modes (exposed via the MCP `sync_data` tool):
 npm test                          # full Jest suite (ts-jest ESM preset)
 npm test -- tests/sync.test.ts    # single file
 npm run build                     # tsc → dist/ (ESM)
+npm run hooks:install             # after clone — installs the pre-commit hook
 ```
+
+### Secret scanning
+
+[gitleaks](https://github.com/gitleaks/gitleaks/releases) must be on `PATH`. A
+`pre-commit` hook scans staged changes, and the `secrets` workflow scans the full
+history and working tree on every push and pull request.
+
+```bash
+npm run scan:secrets              # full git history
+npm run scan:secrets:tree         # working tree
+npm run scan:secrets:selftest     # verify the scanner itself still works
+```
+
+Run the self-test after editing `.gitleaks.toml`: a malformed config makes gitleaks
+report "no leaks found" and exit 0, so a green scan proves nothing on its own.
 
 See `CLAUDE.md` for architecture notes, project-specific gotchas, and the sync pipeline's invariants.
 

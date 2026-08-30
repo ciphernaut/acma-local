@@ -1,0 +1,95 @@
+# gitleaks configuration — https://github.com/gitleaks/gitleaks
+#
+# Extends the bundled ruleset rather than replacing it, so new upstream rules are
+# picked up automatically on a version bump.  Only additions and allowlists live
+# here.
+#
+# Run:
+#   gitleaks git --redact              # full history
+#   gitleaks dir --redact              # working tree
+#   gitleaks git --staged --redact     # what the pre-commit hook runs
+
+[extend]
+useDefault = true
+
+[allowlist]
+title = "acma-local false positives"
+
+# NOTE: scripts/gitleaks-selftest.sh is deliberately NOT allowlisted. It used to
+# be, and that blind spot let real-shaped fixture literals reach a push, where
+# GitHub push protection caught what this config had been told to ignore. The
+# fixtures are now assembled at runtime so the file is clean to any scanner.
+
+# Generated and vendored data.  These carry no credentials but do carry long
+# high-entropy-looking strings, and they are large enough that scanning them on
+# every commit is wasted work:
+#
+#   seed/spectrum_plan.sql, seed/spectrum_plan_source.yaml
+#     Generated from the ACMA Spectrum Plan PDF.  Both embed the SHA-256 of the
+#     source PDF and of the vocabulary spreadsheet as provenance
+#     (docs/spectrum-provenance.md), which reads as a 64-char hex secret.
+#
+#   seed/emissions.sql
+#     Generated from CODE_TABLES in src/emissions.ts.
+paths = [
+    '''^seed/spectrum_plan\.sql$''',
+    '''^seed/spectrum_plan_source\.yaml$''',
+    '''^seed/emissions\.sql$''',
+    '''^package-lock\.json$''',
+    '''^docs/Table of Frequency Band Allocations xlsx\.xlsx$''',
+    # Not tracked, but `gitleaks dir` walks them: 600 MB of dependencies and
+    # local data that no commit can ever contain.
+    '''^node_modules/''',
+    '''^\.venv/''',
+    '''^data/''',
+    '''^dist/''',
+    '''^scratch/''',
+    '''^inputs/''',
+]
+
+# Bare SHA-256 digests recorded as provenance in prose and in code comments.
+# Narrow deliberately: 64 lowercase hex only, so a real 64-char credential in a
+# different alphabet still trips the generic rules.
+regexes = [
+    '''\b[0-9a-f]{64}\b''',
+]
+
+regexTarget = "match"
+
+# The ACMA REST API and the Federal Register of Legislation are public and
+# unauthenticated; no token is involved in any URL in this repo.
+[[rules]]
+id = "acma-local-private-key"
+description = "Private key committed to the repository"
+regex = '''-----BEGIN (?:RSA|DSA|EC|OPENSSH|PGP)? ?PRIVATE KEY( BLOCK)?-----'''
+keywords = ["BEGIN"]
+
+[[rules]]
+id = "acma-local-env-assignment"
+description = "Credential-looking assignment in a tracked file"
+# Catches the shape this project would most plausibly grow: a bearer token or
+# password pasted into a committed .env, config, or compose file.  See
+# docs/AUTH-REWORK.md for the bearer-auth work this guards.
+# The value deliberately excludes "." so an attribute reference such as
+# `password = args.password` is not a hit; a real secret is a literal, not a
+# dotted path.  12+ chars keeps short placeholders out.
+regex = '''(?i)\b(bearer[_-]?token|auth[_-]?token|api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd)\s*[:=]\s*['"]?[A-Za-z0-9_\-\+=]{12,}['"]?'''
+keywords = [
+    "bearer_token", "bearertoken", "auth_token", "authtoken",
+    "api_key", "apikey", "access_token", "accesstoken",
+    "client_secret", "clientsecret", "password", "passwd",
+]
+
+[[rules.allowlists]]
+regexTarget = "match"
+# Test fixtures and documentation examples are allowed to contain placeholders.
+paths = [
+    '''^tests/''',
+    '''^docs/''',
+    '''^\.gitleaks\.toml$''',
+]
+regexes = [
+    '''(?i)(example|placeholder|dummy|redacted|changeme|your[_-]?token|xxx+|<[^>]+>)''',
+    # Code reading a credential from somewhere else, rather than embedding one.
+    '''(?i)=\s*(args|process|os|env|config|opts|options|self|this|params)\b''',
+]

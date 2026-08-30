@@ -82,6 +82,36 @@ Runtime introspection: call the `describe_schema` MCP tool (or `describeSchema()
 - **Spectrum plan pipeline.** `seed/spectrum_plan_source.yaml` is the canonical source for `spectrum_*` tables, extracted from the ACMA Spectrum Plan PDF by `tools/extract-rrsp/extract.py` (PDF is gitignored; its SHA-256 is pinned in the YAML `meta` block). The current baseline is the **2025 compilation** `F2025C01105`, not the 2021 original, which ceased to be in force on 8 October 2025. **`docs/spectrum-provenance.md` is the full chain** — inputs and their hashes, the byte-reproducible rebuild recipe (`SOURCE_DATE_EPOCH` pins the only non-deterministic field), expected row counts, and the four typographic errors in the source document with the evidence for each correction. Corrections live in `SOURCE_ERRATA` in `extract.py`; never loosen a parsing rule to absorb one. `seed/spectrum_plan.sql` is generated from the YAML plus any overlays in `seed/patches/*.yaml` by running `npx tsx scripts/generate-spectrum-seed.ts`. Patches in `seed/patches/` record post-baseline ACMA amendments; add a new `YYYY-MM-DD-<topic>.yaml` overlay, regenerate the SQL, then run `npm run import-spectrum-plan -- --reseed` to apply to an existing DB. Do not hand-edit `spectrum_plan.sql` — regenerate it from YAML.
 - **`CODE_TABLES` is the source of truth.** The seed file `seed/emissions.sql` is generated from `src/emissions.ts`'s `CODE_TABLES` constant. Don't hand-edit the seed; edit the constant and regenerate via `npm run dump-emissions`.
 
+## Secret scanning
+
+[gitleaks](https://github.com/gitleaks/gitleaks) guards the repo at three points: a
+`pre-commit` hook, the `secrets` CI workflow (full history + working tree), and
+`npm run scan:secrets` on demand.
+
+```bash
+npm run hooks:install            # after clone — copies .githooks/ into .git/hooks/
+npm run scan:secrets             # full history
+npm run scan:secrets:tree        # working tree
+npm run scan:secrets:selftest    # prove the scanner still works
+```
+
+- **`npm run scan:secrets:selftest` is not optional ceremony.** A malformed
+  `.gitleaks.toml` makes gitleaks report "no leaks found" and exit 0 — an invalid
+  `regexTarget` value silently disabled every rule during setup. The self-test
+  plants known secrets and known-safe strings and asserts both outcomes, so run it
+  after any config edit. CI runs it before the scan for the same reason.
+- **Config lives in `.gitleaks.toml`.** It extends the bundled ruleset
+  (`useDefault = true`) and adds two repo-specific rules plus allowlists. The
+  generated seed files are allowlisted because they embed SHA-256 provenance
+  digests that read as 64-char secrets — see `docs/spectrum-provenance.md`.
+- **Hooks are installed by copy, not `core.hooksPath`.** That setting is exclusive
+  and would disable a global hooks directory; copying into `.git/hooks/` lets a
+  global dispatcher that chains to `$(git rev-parse --git-dir)/hooks/<name>` keep
+  working.
+- The hook **fails closed**: if gitleaks is not installed, the commit is blocked
+  rather than silently unscanned. `git commit --no-verify` bypasses it; prefer an
+  allowlist entry or a `gitleaks:allow` comment so the next person is not blocked.
+
 ## Environment variables
 
 | Variable | Purpose |

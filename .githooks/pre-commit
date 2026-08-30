@@ -1,0 +1,30 @@
+#!/bin/sh
+# Block commits that contain secrets.
+#
+# Installed into .git/hooks/ by `npm run hooks:install` — NOT by setting
+# core.hooksPath, which would override a global hooks directory if one is
+# configured.  A global dispatcher that chains to .git/hooks/<name> keeps working.
+#
+# Bypass (rarely correct, and only for a false positive you have verified):
+#   git commit --no-verify
+# Prefer adding an allowlist entry to .gitleaks.toml, or a `gitleaks:allow`
+# comment on the offending line, so the next person is not blocked too.
+
+GITLEAKS="${GITLEAKS:-gitleaks}"
+
+if ! command -v "$GITLEAKS" >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks not found — staged changes were NOT scanned for secrets." >&2
+    echo "  Install: https://github.com/gitleaks/gitleaks/releases" >&2
+    echo "  Then:    npm run hooks:install" >&2
+    # Fail closed.  A hook that silently passes when the scanner is missing is
+    # worse than no hook, because the repo looks protected when it is not.
+    echo "  To commit anyway: git commit --no-verify" >&2
+    exit 1
+fi
+
+if ! "$GITLEAKS" git --staged --no-banner --redact --exit-code 1; then
+    echo >&2
+    echo "pre-commit: secrets detected in staged changes — commit blocked." >&2
+    echo "Rotate anything real that was exposed; do not just unstage it." >&2
+    exit 1
+fi
