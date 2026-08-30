@@ -5,6 +5,30 @@ chain from published law to shipped SQL: what the inputs are, how to reproduce
 the output byte-for-byte, and every place the extractor departs from the source
 text, with the evidence for each departure.
 
+## Why only this data has a provenance chain
+
+The RRL tables — `client`, `licence`, `site`, `device_details` and the rest — are
+synced straight from ACMA's manifest API and deliberately carry **no** equivalent
+chain. That is a scope decision, not an oversight, and it should stay that way.
+
+The difference is how the data is obtained, not how important it is. The RRL sync
+is a mechanical download of a published dataset: it either succeeded or it failed,
+and re-running it gets the current extract. Nothing is interpreted along the way,
+so there is nothing to audit.
+
+This data is the opposite. It is ETL'd out of a legislative instrument published as
+a PDF, by a parser making judgement calls about wrapped service names, merged table
+cells, page boundaries and typographic errors in the source. Every one of those is a
+place where the shipped answer could differ from the law, silently. That is what the
+hashes, the reproducible rebuild and the errata table exist to make checkable — and
+why it is worth the effort here and nowhere else.
+
+A consequence worth stating plainly: the RRL half of the database is reproducible
+but not deterministic. ACMA publishes a rolling extract with no archived versions,
+so a sync today yields today's data, not the snapshot someone else had. If that ever
+matters, recording each sync's manifest `LastMdified` into `meta` would be the
+minimum fix — but it has not been needed.
+
 ## Inputs
 
 | Input | Identity | SHA-256 |
