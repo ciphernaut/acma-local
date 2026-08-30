@@ -4,6 +4,9 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+- **`execute_sql` and `export_kml` docs now cover the three traps that bite in practice** (fetched via `describe_tool`): don't terminate a query with a semicolon; always check `truncated`, because the 500-row cap is hard, has no pagination, and silently shortens any `export_kml` built from that result (aggregates are computed inside SQLite and are never truncated, so `SELECT COUNT(*)` sizes a result set safely); and `export_kml` takes each placemark title from a column named `NAME`, so aliasing it away leaves every placemark titled "ACMA Site".
+
 ### Fixed
 - **`execute_sql` no longer rejects a query whose string literal contains a semicolon.** The multiple-statement guard was `wrapped.includes(';')`, which does not respect quoting, so `SELECT CASE WHEN x=0 THEN 'note; here' END` failed with "Multiple SQL statements are not allowed." Replaced with `hasStatementSeparator()`, which skips single-quoted strings (including `''` escapes), `"`/`` ` ``/`[]` quoted identifiers, and `--` / slash-star comments, and flags only a separator outside all of them. A real `SELECT 1; DROP TABLE …` is still rejected.
 - **Two built-in sample queries were unrunnable.** "Most common modulation type across all devices" and "All FM analogue telephony devices" ended with a trailing `;`, so `list_sample_queries` advertised queries `execute_sql` refused — and which would have been a syntax error regardless once wrapped in `SELECT * FROM (...) LIMIT n`. A test now asserts every sample query passes the validator.

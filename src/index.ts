@@ -217,8 +217,15 @@ Run a read-only SELECT or WITH (CTE) query directly against the ACMA RRL SQLite 
 - Use describe_schema to discover available tables and columns at runtime
 - Use list_sample_queries first if unsure what to query
 - Only SELECT/WITH statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
+- Do NOT terminate the query with a semicolon. A separator outside quotes is rejected as a second statement, and a trailing ';' is a syntax error once the query is wrapped for the row limit. A ';' INSIDE a string literal or a comment is fine.
 - Results capped at 'limit' rows (default 100, max 500)
 - If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for optional KML export via export_kml
+
+## Row limit — always check 'truncated'
+The cap is a hard 500 with no pagination. When 'truncated' is true, rows were dropped and
+anything built from that result (export_kml especially) is INCOMPLETE. Aggregates are
+computed inside SQLite and are never truncated, so run a SELECT COUNT(*) first to size a
+result set before exporting it. Beyond 500 rows, aggregate or narrow the filter.
 
 ## Output
 { columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string, _hints?: ... }`,
@@ -233,6 +240,17 @@ Generate a KML file from cached query results.
 ## Usage
 - Call this AFTER running a query that returned a result_id (e.g. execute_sql, search_sites, get_site_details, get_licence_details)
 - Returns a KML <Placemark> collection ready to drop into Google Earth or any KML-aware viewer
+
+## Name your placemarks
+The placemark title is taken from a column called NAME (case-insensitive). Aliasing it
+away — SELECT s.NAME AS SITE — leaves every placemark titled "ACMA Site". Keep a column
+named NAME, or alias something else to it. Every other column becomes a row in the
+placemark popup table, so select the fields you want a reader to see.
+
+## It exports only what the query returned
+The cache holds the rows of that one result. A query that reported truncated: true
+produces a KML that is silently short, so check that flag before exporting and confirm
+the placemark count is what you expected.
 
 ## Input
 - result_id: the result_id returned by the previous tool call`,
