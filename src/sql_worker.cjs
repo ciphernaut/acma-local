@@ -12,6 +12,49 @@ const Database = require('better-sqlite3');
 
 const { dbPath, sql, limit } = workerData;
 
+// Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker
+// cannot import from there (ESM resolution differs between tsx and dist/), so the
+// logic is inlined. tests/sql_statement_separator.test.ts asserts the copies match.
+// A naive includes(';') rejected legitimate queries whose STRING LITERALS contain
+// a semicolon; only a separator outside quotes/comments is a real second statement.
+function hasStatementSeparator(sql) {
+    let i = 0;
+    while (i < sql.length) {
+        const ch = sql[i];
+        if (ch === "'" || ch === '"' || ch === '`') {
+            const quote = ch;
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === quote) {
+                    if (sql[i + 1] === quote) { i += 2; continue; }
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (ch === '[') {
+            while (i < sql.length && sql[i] !== ']') i++;
+            i++;
+            continue;
+        }
+        if (ch === '-' && sql[i + 1] === '-') {
+            while (i < sql.length && sql[i] !== '\n') i++;
+            continue;
+        }
+        if (ch === '/' && sql[i + 1] === '*') {
+            i += 2;
+            while (i < sql.length && !(sql[i] === '*' && sql[i + 1] === '/')) i++;
+            i += 2;
+            continue;
+        }
+        if (ch === ';') return true;
+        i++;
+    }
+    return false;
+}
+
 function runQuery(dbPath, sql, limit) {
     const trimmed = sql.trim();
     if (!trimmed) throw new Error('SQL query cannot be empty.');
@@ -37,7 +80,7 @@ function runQuery(dbPath, sql, limit) {
     db.pragma('temp_store = MEMORY');
 
     // Prevent multiple statements from executing by separating the validation
-    if (wrapped.includes(';')) {
+    if (hasStatementSeparator(wrapped)) {
         throw new Error("Multiple SQL statements are not allowed.");
     }
 

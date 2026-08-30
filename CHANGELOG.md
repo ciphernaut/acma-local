@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+- **`execute_sql` no longer rejects a query whose string literal contains a semicolon.** The multiple-statement guard was `wrapped.includes(';')`, which does not respect quoting, so `SELECT CASE WHEN x=0 THEN 'note; here' END` failed with "Multiple SQL statements are not allowed." Replaced with `hasStatementSeparator()`, which skips single-quoted strings (including `''` escapes), `"`/`` ` ``/`[]` quoted identifiers, and `--` / slash-star comments, and flags only a separator outside all of them. A real `SELECT 1; DROP TABLE …` is still rejected.
+- **Two built-in sample queries were unrunnable.** "Most common modulation type across all devices" and "All FM analogue telephony devices" ended with a trailing `;`, so `list_sample_queries` advertised queries `execute_sql` refused — and which would have been a syntax error regardless once wrapped in `SELECT * FROM (...) LIMIT n`. A test now asserts every sample query passes the validator.
+- The scanner is inlined in `src/sql_worker.ts` and `src/sql_worker.cjs` (the worker cannot import from `src/sql.ts`; ESM resolution differs between `tsx` and `dist/`). A test compares the three copies with types, comments and whitespace normalised, so the standing drift hazard fails loudly instead of silently.
+
+
 ## [1.11.0] - 2026-08-30
 
 > **Upgrading.** The spectrum plan data is replaced wholesale: the baseline moves from

@@ -20,6 +20,65 @@ export interface SqlResult {
  * Enforces SELECT-only: any other statement type throws an error.
  * Applies a row limit (default 100, max 500).
  */
+/**
+ * True when `sql` contains a statement separator OUTSIDE of string literals,
+ * quoted identifiers and comments.
+ *
+ * A naive `sql.includes(';')` rejects legitimate queries — a `;` inside a string
+ * literal (`SELECT 'note; here'`) is inert, but was reported as "Multiple SQL
+ * statements are not allowed." This scanner tracks SQLite's quoting forms so only
+ * a real separator trips it:
+ *   'single quoted'  with '' escape      "quoted ident"  with "" escape
+ *   `backtick ident`                     [bracket ident]
+ *   -- line comment                      slash-star block comments
+ *
+ * Defence in depth, not the sole control: the query is also wrapped in
+ * `SELECT * FROM (...)`, prepared with better-sqlite3 (which refuses multiple
+ * statements), and run inside a transaction that always rolls back.
+ */
+export function hasStatementSeparator(sql: string): boolean {
+    let i = 0;
+    while (i < sql.length) {
+        const ch = sql[i];
+
+        if (ch === "'" || ch === '"' || ch === '`') {
+            const quote = ch;
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === quote) {
+                    if (sql[i + 1] === quote) { i += 2; continue; }  // doubled = escaped
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+
+        if (ch === '[') {                                   // SQLite bracket identifier
+            while (i < sql.length && sql[i] !== ']') i++;
+            i++;
+            continue;
+        }
+
+        if (ch === '-' && sql[i + 1] === '-') {             // line comment
+            while (i < sql.length && sql[i] !== '\n') i++;
+            continue;
+        }
+
+        if (ch === '/' && sql[i + 1] === '*') {             // block comment
+            i += 2;
+            while (i < sql.length && !(sql[i] === '*' && sql[i + 1] === '/')) i++;
+            i += 2;
+            continue;
+        }
+
+        if (ch === ';') return true;
+        i++;
+    }
+    return false;
+}
+
 export function executeSql(
     db: Database.Database,
     sql: string,
@@ -324,13 +383,13 @@ FROM device_details d
 JOIN emission_modulation m ON SUBSTR(TRIM(d.EMISSION), 5, 1) = m.code
 WHERE LENGTH(TRIM(d.EMISSION)) >= 7
 GROUP BY m.code
-ORDER BY device_count DESC;` },
+ORDER BY device_count DESC` },
     { category: 'power-user', description: 'All FM analogue telephony devices (classic VHF/UHF land mobile)',
       query: `SELECT LICENCE_NO, FREQUENCY, EMISSION, TRANSMITTER_POWER, TRANSMITTER_POWER_UNIT
 FROM device_details
 WHERE SUBSTR(TRIM(EMISSION), 5, 3) = 'F3E'
 ORDER BY FREQUENCY
-LIMIT 100;` },
+LIMIT 100` },
 ];
 
 export function listSampleQueries(filter?: {
