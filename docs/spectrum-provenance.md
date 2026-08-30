@@ -55,7 +55,25 @@ has 51.4–52.4), so it is two editions behind current law. ACMA retired it in t
 2019 CMS migration; the only surviving copy is a single Wayback capture of
 24 March 2019, byte-identical to the file committed here:
 
-<https://web.archive.org/web/20190324125652/https://acma.gov.au/-/media/Spectrum-Engineering/Information/Spreasheet/Table-of-Frequency-Band-Allocations-xlsx.xlsx>
+The `?la=en` query string is part of the archived URL and the capture 404s without
+it. Rather than trust a transcribed link, find the capture yourself:
+
+```bash
+curl -G http://web.archive.org/cdx/search/cdx \
+  --data-urlencode "url=acma.gov.au/-/media/Spectrum-Engineering/Information/Spreasheet/Table-of-Frequency-Band-Allocations-xlsx.xlsx" \
+  --data-urlencode "matchType=prefix" \
+  --data-urlencode "fl=timestamp,original,statuscode,digest"
+# 20190324125652 https://acma.gov.au/-/media/.../Table-of-Frequency-Band-Allocations-xlsx.xlsx?la=en 200 DLGCDJ4JR4FDJVDLRV5RV3MUORJIZRSB
+```
+
+Raw bytes (the `id_` modifier suppresses the archive's rewriting), which hash to the
+`adf935d5…` pinned above:
+
+```bash
+curl -L -o check.xlsx \
+  "https://web.archive.org/web/20190324125652id_/https://acma.gov.au/-/media/Spectrum-Engineering/Information/Spreasheet/Table-of-Frequency-Band-Allocations-xlsx.xlsx?la=en"
+sha256sum check.xlsx
+```
 
 Its second role is as a **validation oracle**: 542 of ~550 of its band boundaries
 match the 2021 seed, and 94% of the bands it shares with the current extraction
@@ -187,3 +205,10 @@ for. A dropped leading `1`.
 
 `tools/extract-rrsp/audit.py` was retired: its heuristic passed on data with ~200
 bad rows (`return 0 if suspicious < 200 else 1`).
+
+- `npm run check:doc-links` — every URL cited in the docs must resolve. Provenance
+  is only worth something if a reader can follow it, and a citation that 404s is
+  indistinguishable from an invented one. This repo shipped exactly that: the
+  Wayback link above was transcribed without its `?la=en` query string, so it
+  returned 404 while the capture behind it was real and byte-identical. Needs
+  network, so it is not in `npm test`; run it after editing docs.

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- **`npm run check:doc-links`** verifies that every URL cited in the documentation resolves. Provenance is only useful if a reader can follow it, and a citation that 404s cannot be told apart from an invented one.
+
+### Fixed
+- **The Wayback citation for the vocabulary spreadsheet 404'd.** It was transcribed into `docs/spectrum-provenance.md` without its `?la=en` query string. The capture itself is real — re-verified as HTTP 200, 170,453 bytes, SHA-256 `adf935d5…`, byte-identical to the committed file — but the link as published could not be followed. Replaced with the archive CDX query that finds the capture plus the raw `id_` download, so the source can be located without trusting a transcribed URL.
+
 ### Changed
 - **`execute_sql` and `export_kml` docs now cover the three traps that bite in practice** (fetched via `describe_tool`): don't terminate a query with a semicolon; always check `truncated`, because the 500-row cap is hard, has no pagination, and silently shortens any `export_kml` built from that result (aggregates are computed inside SQLite and are never truncated, so `SELECT COUNT(*)` sizes a result set safely); and `export_kml` takes each placemark title from a column named `NAME`, so aliasing it away leaves every placemark titled "ACMA Site".
 

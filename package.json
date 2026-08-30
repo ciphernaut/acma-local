@@ -26,7 +26,8 @@
     "scan:secrets": "gitleaks git --no-banner --redact",
     "scan:secrets:staged": "gitleaks git --staged --no-banner --redact",
     "scan:secrets:tree": "gitleaks dir --no-banner --redact",
-    "scan:secrets:selftest": "bash scripts/gitleaks-selftest.sh"
+    "scan:secrets:selftest": "bash scripts/gitleaks-selftest.sh",
+    "check:doc-links": "bash scripts/check-doc-links.sh"
   },
   "keywords": [],
   "author": "",
