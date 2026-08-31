@@ -5,9 +5,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- **KML exports load as real GIS layers.** Attributes are now emitted as `ExtendedData` against a typed `Schema`, so OGR — and therefore QGIS — exposes them as filterable, styleable fields. Previously every value lived inside the HTML `<description>` balloon and a GIS saw only `Name` and `Description`; verified with `ogrinfo`. Whole-number columns are typed `int`, numeric `float`, the rest `string`.
+- **`export_kml` takes a `flavour`** — `earth` (default, unchanged: HTML popup plus attributes) or `qgis`, which omits the popup. A GIS reads attributes from `ExtendedData` and shows the balloon markup as a large useless `Description` field; dropping it cut a 189-site export from 624 KB to 240 KB.
 - **`npm run check:doc-links`** verifies that every URL cited in the documentation resolves. Provenance is only useful if a reader can follow it, and a citation that 404s cannot be told apart from an invented one.
 
 ### Fixed
+- **KML attribute values were truncated at 200 characters** with an ellipsis, silently losing the tail of long lists — 4 cells in a 189-site export, including licence-number lists. Values are now written in full, and XML metacharacters are escaped in `ExtendedData`.
 - **The Wayback citation for the vocabulary spreadsheet 404'd.** It was transcribed into `docs/spectrum-provenance.md` without its `?la=en` query string. The capture itself is real — re-verified as HTTP 200, 170,453 bytes, SHA-256 `adf935d5…`, byte-identical to the committed file — but the link as published could not be followed. Replaced with the archive CDX query that finds the capture plus the raw `id_` download, so the source can be located without trusting a transcribed URL.
 
 ### Changed

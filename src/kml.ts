@@ -3,12 +3,37 @@
  * Supports POINT, LINESTRING, and POLYGON WKT, plus simple LATITUDE/LONGITUDE columns.
  */
 
-export function generateKml(columns: string[], rows: unknown[][]): string {
+export type KmlFlavour = 'earth' | 'qgis';
+
+/**
+ * @param flavour 'earth' (default) keeps the HTML balloon that Google Earth shows
+ *   on click. 'qgis' omits it: a GIS loads the attributes from ExtendedData, and
+ *   the balloon markup just arrives as a large useless Description field in the
+ *   attribute table — and is most of the file size.
+ */
+export function generateKml(
+    columns: string[],
+    rows: unknown[][],
+    flavour: KmlFlavour = 'earth',
+): string {
     const lCols = columns.map(c => c.toLowerCase());
     const latIdx = lCols.indexOf('latitude');
     const lngIdx = lCols.indexOf('longitude');
     const geomIdx = lCols.indexOf('geometry');
     const nameIdx = lCols.indexOf('name');
+
+    // Columns carried as real attributes. The HTML <description> below is only a
+    // Google Earth balloon: OGR — and so QGIS — reads Name and Description from it
+    // and nothing else, so anything meant to be filtered, styled or joined has to
+    // be repeated in <ExtendedData>.
+    const attrIdx = columns
+        .map((_, i) => i)
+        .filter(i => i !== latIdx && i !== lngIdx && i !== geomIdx && i !== nameIdx);
+    const schemaId = 'ACMA_schema';
+    const schema = attrIdx.length === 0 ? '' : `
+    <Schema name="${schemaId}" id="${schemaId}">
+${attrIdx.map(i => `      <SimpleField type="${inferType(rows, i)}" name="${fieldName(columns[i]!)}"></SimpleField>`).join('\n')}
+    </Schema>`;
 
     let placemarks = '';
 
@@ -35,11 +60,17 @@ export function generateKml(columns: string[], rows: unknown[][]): string {
         }
 
         if (geometryKml) {
-            const description = generateDescription(columns, row);
+            const description = flavour === 'qgis' ? '' : `
+      <description><![CDATA[${generateDescription(columns, row)}]]></description>`;
+            const extended = attrIdx.length === 0 ? '' : `
+      <ExtendedData>
+        <SchemaData schemaUrl="#${schemaId}">
+${attrIdx.map(i => `          <SimpleData name="${fieldName(columns[i]!)}">${xmlEscape(row[i])}</SimpleData>`).join('\n')}
+        </SchemaData>
+      </ExtendedData>`;
             placemarks += `
     <Placemark>
-      <name><![CDATA[${name}]]></name>
-      <description><![CDATA[${description}]]></description>
+      <name><![CDATA[${name}]]></name>${description}${extended}
       ${geometryKml}
       <styleUrl>#ACMA_style</styleUrl>
     </Placemark>`;
@@ -48,7 +79,7 @@ export function generateKml(columns: string[], rows: unknown[][]): string {
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document id="ACMA_KML">
+  <Document id="ACMA_KML">${schema}
     <Style id="ACMA_style">
       <LabelStyle><scale>0.75</scale></LabelStyle>
       <IconStyle>
@@ -70,6 +101,45 @@ export function generateKml(columns: string[], rows: unknown[][]): string {
     </Folder>
   </Document>
 </kml>`;
+}
+
+/** XML text-node escaping for ExtendedData values. */
+function xmlEscape(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/** Column name reduced to something valid as an XML attribute value / field name. */
+function fieldName(column: string): string {
+    return column.replace(/[^A-Za-z0-9_]/g, '_');
+}
+
+/**
+ * Field type for a column, from the values actually present: int when every
+ * non-empty value is a whole number, float when they are all numeric, else string.
+ * QGIS will happily sort and range-filter a typed column and will not on a string.
+ */
+function inferType(rows: unknown[][], idx: number): 'int' | 'float' | 'string' {
+    let seen = false;
+    let allInt = true;
+    for (const row of rows) {
+        const v = row[idx];
+        if (v === null || v === undefined || v === '') continue;
+        seen = true;
+        if (typeof v === 'number') {
+            if (!Number.isInteger(v)) allInt = false;
+            continue;
+        }
+        const s = String(v).trim();
+        if (s === '' || !/^-?\d+(\.\d+)?$/.test(s)) return 'string';
+        if (!/^-?\d+$/.test(s)) allInt = false;
+    }
+    if (!seen) return 'string';
+    return allInt ? 'int' : 'float';
 }
 
 /**
@@ -123,9 +193,10 @@ function generateDescription(columns: string[], row: unknown[]): string {
     for (let i = 0; i < columns.length; i++) {
         const val = row[i];
         if (val !== null && val !== undefined && val !== '') {
-            // Truncate long strings for description
-            let displayVal = String(val);
-            if (displayVal.length > 200) displayVal = displayVal.substring(0, 197) + '...';
+            // No truncation: cutting values at 200 characters silently lost the
+            // tail of long lists (licence numbers, channel plans) in the popup.
+            const displayVal = String(val)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             html += `<tr><td style="padding: 2px; background: #eee;"><b>${columns[i]}</b></td><td style="padding: 2px;">${displayVal}</td></tr>`;
         }
     }

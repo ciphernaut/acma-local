@@ -252,8 +252,18 @@ The cache holds the rows of that one result. A query that reported truncated: tr
 produces a KML that is silently short, so check that flag before exporting and confirm
 the placemark count is what you expected.
 
+## Loading into QGIS or another GIS
+Attributes are emitted as KML ExtendedData against a typed Schema, so they arrive as
+real, filterable fields rather than one blob of HTML. Whole-number columns are typed
+int, numeric ones float, everything else string.
+
+Pass flavour: "qgis" to drop the HTML popup balloon. A GIS reads the attributes from
+ExtendedData and shows the balloon markup as a large useless Description field, and
+that markup is most of the file size. Keep the default 'earth' for Google Earth.
+
 ## Input
-- result_id: the result_id returned by the previous tool call`,
+- result_id: the result_id returned by the previous tool call
+- flavour: 'earth' (default) or 'qgis'`,
     },
     describe_schema: {
         summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
@@ -686,6 +696,11 @@ function createServer(): Server {
                     type: 'object',
                     properties: {
                         result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                        flavour: {
+                            type: 'string',
+                            enum: ['earth', 'qgis'],
+                            description: "'earth' (default) includes an HTML popup balloon; 'qgis' omits it, leaving only the ExtendedData attributes",
+                        },
                     },
                     required: ['result_id'],
                 },
@@ -1038,7 +1053,8 @@ function createServer(): Server {
                     isError: true,
                 };
             }
-            const kml = generateKml(entry.columns, entry.rows);
+            const flavour = args?.flavour === 'qgis' ? 'qgis' : 'earth';
+            const kml = generateKml(entry.columns, entry.rows, flavour);
             return {
                 content: [{ type: 'text', text: kml }]
             };
