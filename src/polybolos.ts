@@ -53,12 +53,18 @@ function idx(lower: string[], ...names: string[]): number {
     return -1;
 }
 
+/** `null`/`undefined`/`''` are absent, not zero — `Number(null)` and `Number('')` are both `0`. */
+function toNumberOrNull(v: unknown): number | null {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isNaN(n) ? null : n;
+}
+
 /** A coordinate pair, or null when unusable. Zero is legitimate and is kept. */
 function toLatLng(lat: unknown, lng: unknown): { lat: number; lng: number } | null {
-    const y = Number(lat);
-    const x = Number(lng);
-    if (lat === null || lat === undefined || lat === '' || Number.isNaN(y)) return null;
-    if (lng === null || lng === undefined || lng === '' || Number.isNaN(x)) return null;
+    const y = toNumberOrNull(lat);
+    const x = toNumberOrNull(lng);
+    if (y === null || x === null) return null;
     if (y < -90 || y > 90 || x < -180 || x > 180) return null;
     return { lat: y, lng: x };
 }
@@ -96,7 +102,7 @@ function agree(values: Array<string | number | boolean | null>): string | number
 
 interface SiteArgs {
     columns: string[]; lower: string[]; rows: unknown[][]; latI: number; lngI: number; siteI: number; nameI: number;
-    freqI: number; emisI: number; svcI: number; typeI: number; statI: number; stats?: ExportStats;
+    freqI: number; emisI: number; svcI: number; typeI: number; statI: number; sddI: number; stats?: ExportStats;
 }
 
 function projectSites(a: SiteArgs): Entity[] {
@@ -121,8 +127,8 @@ function projectSites(a: SiteArgs): Entity[] {
 
         const bands = { band_hf: false, band_vhf: false, band_uhf: false, band_shf: false };
         for (const row of group) {
-            const f = a.freqI >= 0 ? Number(row[a.freqI]) : NaN;
-            const flags = bandFlags(Number.isNaN(f) ? null : f);
+            const f = a.freqI >= 0 ? toNumberOrNull(row[a.freqI]) : null;
+            const flags = bandFlags(f);
             for (const k of Object.keys(bands) as Array<keyof typeof bands>) {
                 if (flags[k]) bands[k] = true;
             }
@@ -130,19 +136,34 @@ function projectSites(a: SiteArgs): Entity[] {
 
         const pick = (i: number) => i >= 0 ? agree(group.map(r => scalar(r[i]))) : null;
 
+        // device_count is only substantiated when the group actually carries SDD_ID
+        // rows to count distinct devices from; row_count is always a true statement
+        // regardless of what a join fanned the result set out to.
+        let deviceCount: number | undefined;
+        if (a.sddI >= 0) {
+            const ids = new Set<string>();
+            for (const row of group) {
+                const v = row[a.sddI];
+                if (v !== null && v !== undefined && v !== '') ids.add(String(v));
+            }
+            deviceCount = ids.size;
+        }
+
         const properties: Record<string, string | number | boolean | null> = {
             site_id: siteId,
-            device_count: group.length,
+            row_count: group.length,
+            ...(deviceCount !== undefined ? { device_count: deviceCount } : {}),
             service: pick(a.svcI),
             licence_type: pick(a.typeI),
             status: pick(a.statI),
+            emission_class: a.emisI >= 0 ? agree(group.map(r => emissionClass(r[a.emisI]))) : null,
             ...bands,
         };
 
         // Columns the exporter doesn't recognise ride along, aggregated with the same
         // unanimous-value-or-'mixed' rule used for the first-class fields above — silently
         // dropping a column the caller explicitly selected is not acceptable.
-        const claimed = new Set([a.latI, a.lngI, a.siteI, a.freqI, a.emisI, a.svcI, a.typeI, a.statI]);
+        const claimed = new Set([a.latI, a.lngI, a.siteI, a.freqI, a.emisI, a.svcI, a.typeI, a.statI, a.sddI]);
         for (let i = 0; i < a.columns.length; i++) {
             if (claimed.has(i)) continue;
             properties[a.lower[i]!] = pick(i);
@@ -165,7 +186,7 @@ function projectSites(a: SiteArgs): Entity[] {
 
 interface EmitterArgs {
     columns: string[]; rows: unknown[][]; lower: string[];
-    latI: number; lngI: number; sddI: number; nameI: number; freqI: number;
+    latI: number; lngI: number; sddI: number; freqI: number;
     emisI: number; svcI: number; typeI: number; statI: number; stats?: ExportStats;
 }
 
@@ -182,8 +203,7 @@ function projectEmitters(a: EmitterArgs): Entity[] {
             continue;
         }
 
-        const freq = a.freqI >= 0 ? Number(row[a.freqI]) : NaN;
-        const freqHz = Number.isNaN(freq) ? null : freq;
+        const freqHz = a.freqI >= 0 ? toNumberOrNull(row[a.freqI]) : null;
 
         const properties: Record<string, string | number | boolean | null> = {
             sdd_id: scalar(sddId),
@@ -251,8 +271,8 @@ export function generatePolybolos(
     }
 
     const entities = granularity === 'site'
-        ? projectSites({ columns, lower, rows, latI, lngI, siteI, nameI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) })
-        : projectEmitters({ columns, rows, lower, latI, lngI, sddI, nameI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) });
+        ? projectSites({ columns, lower, rows, latI, lngI, siteI, nameI, freqI, emisI, svcI, typeI, statI, sddI, ...(stats !== undefined ? { stats } : {}) })
+        : projectEmitters({ columns, rows, lower, latI, lngI, sddI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) });
 
     if (entities.length > STREAM_CEILING) {
         throw new Error(

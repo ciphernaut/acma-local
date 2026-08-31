@@ -23,12 +23,18 @@ export async function pushToOsiris(payloadJson: string): Promise<IngestResult> {
     const payload = JSON.parse(payloadJson) as { source: string; entities: unknown[] };
     const url = `${base.replace(/\/+$/, '')}/api/sdk/ingest`;
 
+    let data: unknown;
     try {
         const res = await axios.post(url, { ...payload, apiKey: key }, {
             headers: { 'Content-Type': 'application/json' },
             timeout: 15000,
+            // The ingest key travels in the body, so a redirect would silently
+            // re-issue the POST — key included — to whatever the 3xx points at.
+            maxRedirects: 0,
+            maxContentLength: 10 * 1024 * 1024,
+            maxBodyLength: 10 * 1024 * 1024,
         });
-        return res.data as IngestResult;
+        data = res.data;
     } catch (e) {
         const status = (e as { response?: { status?: number } }).response?.status;
         if (status === 503) {
@@ -45,4 +51,20 @@ export async function pushToOsiris(payloadJson: string): Promise<IngestResult> {
         const reason = e instanceof Error ? e.message : String(e);
         throw new Error(`Could not reach OSIRIS at ${url}: ${reason}`);
     }
+
+    // Validate the shape before trusting it: a 200 serving an HTML page (wrong
+    // port, a proxy, a captive portal) yields a string, and a 204 yields
+    // undefined — neither should read as a successful ingest. The body is not
+    // included in the message below: it is attacker-influenceable and reaches
+    // a model context.
+    if (
+        typeof data !== 'object' || data === null ||
+        typeof (data as { accepted?: unknown }).accepted !== 'number' ||
+        typeof (data as { rejected?: unknown }).rejected !== 'number'
+    ) {
+        throw new Error(
+            'OSIRIS returned an unexpected response shape; check OSIRIS_URL points at the OSIRIS app rather than a proxy.',
+        );
+    }
+    return data as IngestResult;
 }

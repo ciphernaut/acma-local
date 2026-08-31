@@ -53,4 +53,39 @@ describe('pushToOsiris', () => {
         jest.spyOn(axios, 'post').mockRejectedValue({ response: { status: 401, data: {} } } as never);
         await expect(pushToOsiris(PAYLOAD)).rejects.not.toThrow(/test-key/);
     });
+
+    it('does not follow redirects, so the body-embedded key cannot leak to a redirect target', async () => {
+        const spy = jest.spyOn(axios, 'post').mockResolvedValue({
+            status: 200, data: { accepted: 1, rejected: 0, errors: [] },
+        } as never);
+
+        await pushToOsiris(PAYLOAD);
+
+        const config = spy.mock.calls[0]![2] as Record<string, unknown>;
+        expect(config.maxRedirects).toBe(0);
+    });
+
+    it('bounds response size so a wedged OSIRIS cannot stream unbounded data into memory', async () => {
+        const spy = jest.spyOn(axios, 'post').mockResolvedValue({
+            status: 200, data: { accepted: 1, rejected: 0, errors: [] },
+        } as never);
+
+        await pushToOsiris(PAYLOAD);
+
+        const config = spy.mock.calls[0]![2] as Record<string, unknown>;
+        expect(typeof config.maxContentLength).toBe('number');
+        expect(typeof config.maxBodyLength).toBe('number');
+    });
+
+    it('rejects an HTML response body instead of reporting fabricated success', async () => {
+        jest.spyOn(axios, 'post').mockResolvedValue({
+            status: 200, data: '<!doctype html><html>wrong port</html>',
+        } as never);
+        await expect(pushToOsiris(PAYLOAD)).rejects.toThrow(/unexpected response shape/i);
+    });
+
+    it('rejects a 204/undefined body instead of reporting {"skipped":0} as success', async () => {
+        jest.spyOn(axios, 'post').mockResolvedValue({ status: 204, data: undefined } as never);
+        await expect(pushToOsiris(PAYLOAD)).rejects.toThrow(/unexpected response shape/i);
+    });
 });

@@ -2,7 +2,7 @@
 
 A Model Context Protocol (MCP) server that exposes the Australian Communications and Media Authority (ACMA) [Register of Radiocommunications Licences (RRL)](https://www.acma.gov.au/radiocomms-licence-data) and the [Australian Radiofrequency Spectrum Plan (ARSP)](https://www.acma.gov.au/australian-radiofrequency-spectrum-plan) as a local SQLite mirror, with manifest-driven sync against ACMA's REST API.
 
-The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) and **Streamable HTTP/SSE** on `:3000` (LM Studio 0.3.17+, networked MCP hosts). Both modes share the same 20-tool catalog.
+The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) and **Streamable HTTP/SSE** on `:3000` (LM Studio 0.3.17+, networked MCP hosts). Both modes share the same 22-tool catalog.
 
 ## Features
 
@@ -13,7 +13,7 @@ The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) an
 - **Power-user SQL** — `execute_sql` runs sandboxed SELECT/WITH queries in a worker thread; `explain_query`, `describe_schema`, and `list_sample_queries` make the schema discoverable.
 - **Progressive disclosure** — `tools/list` returns terse one-liners; `describe_tool(<name>)` fetches the full markdown when needed (matterfront pattern).
 
-## Tools (20)
+## Tools (22)
 
 | Group | Tools |
 |---|---|
@@ -21,13 +21,15 @@ The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) an
 | **Detail lookups** | `get_licence_details`, `get_site_details` |
 | **Spectrum & narrative** | `search_spectrum_band`, `search_application_text`, `get_frequency_allocation` |
 | **SQL backend** | `execute_sql`, `list_sample_queries`, `explain_query` |
-| **Output** | `export_geojson` (QGIS, web maps), `export_kml` (Google Earth), `export_qml` (QGIS style) |
-| **Meta / orchestration** | `sync_data`, `describe_schema`, `describe_tool`, `decode_emission_designator` |
+| **Output** | `export_geojson` (QGIS, web maps), `export_kml` (Google Earth), `export_qml` (QGIS style), `export_polybolos` (OSIRIS map layer) |
+| **Meta / orchestration** | `sync_data`, `describe_schema`, `describe_tool`, `decode_emission_designator`, `push_to_osiris` |
 
 - `search_devices_by_emission` — Find devices/licences by decoded emission descriptor (modulation, info type, etc.). Accepts code letters or descriptions.
 - `decode_emission_designator` — Decode an ITU/ACA emission designator (e.g. 16K0F3E) into structured bandwidth/modulation/info fields.
+- `export_polybolos` — Project a cached `execute_sql` result into Polybolos entities (site or emitter granularity) for OSIRIS. See [`docs/osiris-acma-bridge.md`](docs/osiris-acma-bridge.md).
+- `push_to_osiris` — POST a Polybolos payload to an OSIRIS instance's ingest endpoint. Requires `OSIRIS_URL` and `OSIRIS_INGEST_KEY`.
 
-Search-style results return an `_hints` array suggesting plausible follow-up tools (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_geojson` and `export_kml`).
+Search-style results return an `_hints` array suggesting plausible follow-up tools (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_geojson`, `export_kml`, `export_qml` and `export_polybolos`).
 
 ## Installation
 

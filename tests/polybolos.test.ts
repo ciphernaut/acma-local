@@ -28,7 +28,27 @@ describe('generatePolybolos — site level', () => {
             [7, 'Shared Tower', -27, 153, 900000000, 'Land Mobile'],
         ]);
         expect(p.entities).toHaveLength(1);
-        expect(p.entities[0].properties.device_count).toBe(3);
+        expect(p.entities[0].properties.row_count).toBe(3);
+    });
+
+    it('does not fabricate a device_count when no SDD_ID column is present', () => {
+        const p = parse(COLS, [
+            [7, 'Shared Tower', -27, 153, 150000000, 'Land Mobile'],
+            [7, 'Shared Tower', -27, 153, 450000000, 'Land Mobile'],
+        ]);
+        expect(p.entities[0].properties.row_count).toBe(2);
+        expect(p.entities[0].properties.device_count).toBeUndefined();
+    });
+
+    it('emits device_count as the distinct SDD_ID count when the column is present', () => {
+        const cols = [...COLS, 'SDD_ID'];
+        const p = parse(cols, [
+            [7, 'Shared Tower', -27, 153, 150000000, 'Land Mobile', 901],
+            [7, 'Shared Tower', -27, 153, 450000000, 'Land Mobile', 902],
+            [7, 'Shared Tower', -27, 153, 900000000, 'Land Mobile', 902], // duplicate SDD_ID collapses
+        ]);
+        expect(p.entities[0].properties.row_count).toBe(3);
+        expect(p.entities[0].properties.device_count).toBe(2);
     });
 
     it('uses the FACILITY/LAND ontology slots at site level', () => {
@@ -112,6 +132,44 @@ describe('generatePolybolos — site level', () => {
         ]);
         expect(p.entities[0].properties.industry_cat_name).toBe('mixed');
     });
+
+    it('skips an out-of-range coordinate and counts it, rather than dropping silently', () => {
+        const stats: ExportStats = { skipped: 0 };
+        const p = parse(COLS, [
+            [1, 'A', -27, 153, 150000000, 'Land Mobile'],
+            [2, 'B', 999, 153, 150000000, 'Land Mobile'], // latitude 999 is out of range
+        ], {}, stats);
+        expect(p.entities).toHaveLength(1);
+        expect(stats.skipped).toBe(1);
+    });
+
+    it('rolls up a uniform emission designator across a site group to one class', () => {
+        const cols = [...COLS, 'EMISSION'];
+        const p = parse(cols, [
+            [7, 'Shared Tower', -27, 153, 150000000, 'Land Mobile', '16K0F3E'],
+            [7, 'Shared Tower', -27, 153, 450000000, 'Land Mobile', '16K0F3E'],
+        ]);
+        // 16K0F3E -> F is frequency modulation, group 'angle'.
+        expect(p.entities[0].properties.emission_class).toBe('angle');
+    });
+
+    it('rolls up a mixed emission designator across a site group to "mixed"', () => {
+        const cols = [...COLS, 'EMISSION'];
+        const p = parse(cols, [
+            [7, 'Shared Tower', -27, 153, 150000000, 'Land Mobile', '16K0F3E'],  // angle
+            [7, 'Shared Tower', -27, 153, 450000000, 'Land Mobile', '16K0A1A'],  // amplitude
+        ]);
+        expect(p.entities[0].properties.emission_class).toBe('mixed');
+    });
+
+    it('treats a NULL frequency as absent, not zero, in the site-level band flags', () => {
+        const p = parse(COLS, [[1, 'A', -27, 153, null, 'Land Mobile']]);
+        const props = p.entities[0].properties;
+        expect(props.band_hf).toBe(false);
+        expect(props.band_vhf).toBe(false);
+        expect(props.band_uhf).toBe(false);
+        expect(props.band_shf).toBe(false);
+    });
 });
 
 const ECOLS = ['SDD_ID', 'LICENCE_NO', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'EMISSION', 'SV_NAME'];
@@ -167,5 +225,22 @@ describe('generatePolybolos — emitter level', () => {
         for (const value of Object.values(p.entities[0].properties)) {
             expect(typeof value === 'object' && value !== null).toBe(false);
         }
+    });
+
+    it('treats a NULL frequency as absent, not a fabricated zero', () => {
+        const rows = [[901, '1234567/1', 'Mt Coot-tha', -27.47, 152.95, null, '16K0F3E', 'Land Mobile']];
+        const p = parse(ECOLS, rows, { granularity: 'emitter' });
+        const props = p.entities[0].properties;
+        expect(props.frequency_hz).toBeNull();
+        expect(props.band_hf).toBe(false);
+        expect(props.band_vhf).toBe(false);
+        expect(props.band_uhf).toBe(false);
+        expect(props.band_shf).toBe(false);
+        expect(p.entities[0].name).not.toMatch(/MHz/);
+    });
+
+    it('passes an unrecognised column through as a flat scalar property', () => {
+        const p = parse(ECOLS, one, { granularity: 'emitter' });
+        expect(p.entities[0].properties.licence_no).toBe('1234567/1');
     });
 });
