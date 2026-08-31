@@ -31,6 +31,21 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
             } finally { db.close(); }
         }
 
+        // Seed one client + licence + site so the _hints tests actually exercise the
+        // hint paths. They used to guard on `rows.length > 0` against an empty
+        // database, which meant the assertions never ran and the tests passed
+        // without checking anything.
+        {
+            const db = new Database(testDbPath);
+            try {
+                db.prepare("INSERT INTO client (CLIENT_NO, LICENCEE) VALUES (4242, 'Fixture Holder')").run();
+                db.prepare(`INSERT INTO licence (LICENCE_NO, CLIENT_NO, LICENCE_TYPE_NAME, STATUS, STATUS_TEXT)
+                            VALUES ('1000001/1', 4242, 'Fixed', '1', 'Granted')`).run();
+                db.prepare(`INSERT INTO site (SITE_ID, NAME, LATITUDE, LONGITUDE, STATE, POSTCODE)
+                            VALUES ('S-FIX', 'Fixture Hill', -27.5, 153.0, 'QLD', '2000')`).run();
+            } finally { db.close(); }
+        }
+
         console.log(`Starting server on port ${PORT}...`);
         // detached: the server is spawned via `npx`, which forks `node` as a
         // grandchild.  Killing the npx wrapper alone leaves that node process
@@ -285,31 +300,32 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         const parsed = JSON.parse(response);
         // Response is now an envelope: { rows, _hints? }
         expect(Array.isArray(parsed.rows)).toBe(true);
-        if (parsed.rows.length > 0) {
-            expect(parsed._hints).toBeDefined();
-            expect(parsed._hints[0].tool).toBe('get_licence_details');
-            expect(parsed._hints[0].args).toHaveProperty('licence_no');
-        }
+        expect(parsed.rows.length).toBeGreaterThan(0);
+        expect(parsed._hints).toBeDefined();
+        expect(parsed._hints[0].tool).toBe('get_licence_details');
+        expect(parsed._hints[0].args).toHaveProperty('licence_no');
     }, 15000);
 
     test('search_sites result includes _hints pointing at get_site_details', async () => {
         const response = await callMcpTool('search_sites', { query: '2000', limit: 1 });
         const parsed = JSON.parse(response);
         expect(Array.isArray(parsed.rows)).toBe(true);
-        if (parsed.rows.length > 0) {
-            expect(parsed._hints).toBeDefined();
-            expect(parsed._hints[0].tool).toBe('get_site_details');
-        }
+        expect(parsed.rows.length).toBeGreaterThan(0);
+        expect(parsed._hints).toBeDefined();
+        expect(parsed._hints[0].tool).toBe('get_site_details');
     }, 15000);
 
     test('search_clients result has no _hints (no follow-up tool)', async () => {
-        const response = await callMcpTool('search_clients', { query: 'Test', limit: 1 });
+        // Query the seeded fixture, so a broken search_clients fails here rather
+        // than passing because it returned nothing and therefore no _hints either.
+        const response = await callMcpTool('search_clients', { query: 'Fixture', limit: 1 });
         const parsed = JSON.parse(response);
-        // search_clients still returns a flat array OR an envelope without _hints.
-        // Either acceptable — but no _hints field should be present.
-        if (parsed._hints !== undefined) {
-            throw new Error('search_clients should not emit _hints');
-        }
+        const rows = Array.isArray(parsed) ? parsed : parsed.rows;
+        expect(Array.isArray(rows)).toBe(true);
+        expect(rows.length).toBeGreaterThan(0);
+        // A flat array or an envelope are both acceptable — but never _hints,
+        // because there is no follow-up tool for a client.
+        expect(parsed._hints).toBeUndefined();
     }, 15000);
 
     // ─── End _hints tests ──────────────────────────────────────────────────────

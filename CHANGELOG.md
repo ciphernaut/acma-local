@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+- **Three integration tests asserted nothing.** `search_licences`/`search_sites` `_hints` and `search_clients` guarded their expectations behind `if (rows.length > 0)` against a fixture database seeded with no clients, licences or sites — so the assertions never ran and the tests were green for the wrong reason. The fixture now seeds a client, a licence and a site, and the assertions are unconditional. Verified by regressing the hint tools and watching all three fail.
+
+### Added
+- **`npm run check:vacuous-tests`** flags tests whose assertions can only run inside a conditional, or that contain no assertion at all. An audit aid, not a gate: it is heuristic (first run flagged six, of which two were real) and recognises `throw`-based helpers and TypeScript narrowing guards as legitimate.
+
 ### Deprecated
 - **`export_kml`'s `flavour: "qgis"`.** `export_geojson` is the supported route to a GIS. The flavour still works and is still tested — nothing calling it breaks — but it is no longer advertised in `tools/list`, no longer documented as a way to reach QGIS, and using it logs a warning. It stays hidden indefinitely; no removal date. The reasons KML makes a poor GIS layer live in GDAL's driver rather than in the file, so writing better KML cannot fix them — see `docs/geospatial-export.md`.
 - Geospatial `_hints` now offer both exporters, `export_geojson` first, then `export_kml` for Google Earth.
