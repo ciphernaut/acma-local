@@ -75,7 +75,7 @@ Get full details for a specific licence: client info and all associated radio de
 ## Usage
 - Use after finding a licence number via search_licences
 - Returns: licence record, client/owner info, up to 50 device records (with site coordinates)
-- If results contain geospatial data, a result_id is returned for optional KML export via export_kml
+- If results contain geospatial data, a result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Input
 - licence_no: Exact licence number (e.g. "1191324/1")`,
@@ -90,7 +90,7 @@ Search transmission sites by site name or postcode.
 ## Usage
 - Use when asked about a transmitter location or site
 - Results include: SITE_ID, NAME, STATE, POSTCODE, LATITUDE, LONGITUDE
-- A result_id is returned for optional KML export via export_kml
+- A result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Input
 - query: Site name or postcode`,
@@ -105,7 +105,7 @@ Get full details for a specific site including all devices registered at that si
 ## Usage
 - Use after finding a SITE_ID via search_sites
 - Returns: site record, up to 50 associated device_details records
-- A result_id is returned for optional KML export via export_kml
+- A result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Input
 - site_id: Exact Site ID from site search results`,
@@ -220,7 +220,7 @@ Run a read-only SELECT or WITH (CTE) query directly against the ACMA RRL SQLite 
 - Only SELECT/WITH statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
 - Do NOT terminate the query with a semicolon. A separator outside quotes is rejected as a second statement, and a trailing ';' is a syntax error once the query is wrapped for the row limit. A ';' INSIDE a string literal or a comment is fine.
 - Results capped at 'limit' rows (default 100, max 500)
-- If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for optional KML export via export_kml
+- If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Row limit — always check 'truncated'
 The cap is a hard 500 with no pagination. When 'truncated' is true, rows were dropped and
@@ -232,11 +232,17 @@ result set before exporting it. Beyond 500 rows, aggregate or narrow the filter.
 { columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string, _hints?: ... }`,
     },
     export_kml: {
-        summary: '[KML] Render a previously-cached query result as a KML overlay.',
+        summary: '[KML] Render a previously-cached query result as a KML overlay for Google Earth.',
         tags: ['geospatial'],
         fullDescription: `
 ### [KML Export]
-Generate a KML file from cached query results.
+Generate a KML file from cached query results, for Google Earth.
+
+## For QGIS or a web map, use export_geojson instead
+GDAL's LIBKML driver will not declare a layer geometry type and injects eleven
+boilerplate fields ahead of yours. That is a property of the driver, not of the file,
+so no amount of care in the KML fixes it. On the same 189-site export GeoJSON reports
+a real Point geometry, carries 12 fields against 26, and is roughly half the size.
 
 ## Usage
 - Call this AFTER running a query that returned a result_id (e.g. execute_sql, search_sites, get_site_details, get_licence_details)
@@ -253,18 +259,13 @@ The cache holds the rows of that one result. A query that reported truncated: tr
 produces a KML that is silently short, so check that flag before exporting and confirm
 the placemark count is what you expected.
 
-## Loading into QGIS or another GIS
-Attributes are emitted as KML ExtendedData against a typed Schema, so they arrive as
-real, filterable fields rather than one blob of HTML. Whole-number columns are typed
-int, numeric ones float, everything else string.
-
-Pass flavour: "qgis" to drop the HTML popup balloon. A GIS reads the attributes from
-ExtendedData and shows the balloon markup as a large useless Description field, and
-that markup is most of the file size. Keep the default 'earth' for Google Earth.
+## Attributes
+Attributes are emitted as ExtendedData against a typed Schema as well as in the HTML
+popup, so they survive a trip through a GIS. Whole-number columns are typed int,
+numeric ones float, everything else string.
 
 ## Input
-- result_id: the result_id returned by the previous tool call
-- flavour: 'earth' (default) or 'qgis'`,
+- result_id: the result_id returned by the previous tool call`,
     },
     export_geojson: {
         summary: '[GeoJSON] Render a previously-cached query result as RFC 7946 GeoJSON (best for QGIS).',
@@ -731,12 +732,10 @@ function createServer(): Server {
                 inputSchema: {
                     type: 'object',
                     properties: {
+                        // `flavour` is deliberately NOT advertised. 'qgis' still works
+                        // for existing callers, but export_geojson is the supported
+                        // route to a GIS — see docs/geospatial-export.md.
                         result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                        flavour: {
-                            type: 'string',
-                            enum: ['earth', 'qgis'],
-                            description: "'earth' (default) includes an HTML popup balloon; 'qgis' omits it, leaving only the ExtendedData attributes",
-                        },
                     },
                     required: ['result_id'],
                 },
@@ -854,11 +853,10 @@ function createServer(): Server {
                 const response: any = { ...result };
                 if (resultId) response.result_id = resultId;
                 if (resultId && (result.devices as any[]).some((d: any) => d.LATITUDE != null && d.LONGITUDE != null)) {
-                    response._hints = [{
-                        tool: 'export_kml',
-                        args: { result_id: resultId },
-                        why: 'render geospatially',
-                    }];
+                    response._hints = [
+                        { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
+                        { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
+                    ];
                 }
 
                 return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
@@ -910,11 +908,10 @@ function createServer(): Server {
                 const response: any = { ...result };
                 if (resultId) response.result_id = resultId;
                 if (resultId) {
-                    response._hints = [{
-                        tool: 'export_kml',
-                        args: { result_id: resultId },
-                        why: 'render geospatially',
-                    }];
+                    response._hints = [
+                        { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
+                        { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
+                    ];
                 }
 
                 return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
@@ -1069,11 +1066,10 @@ function createServer(): Server {
                 const response: any = { ...result };
                 if (resultId) {
                     response.result_id = resultId;
-                    response._hints = [{
-                        tool: 'export_kml',
-                        args: { result_id: resultId },
-                        why: 'render geospatially',
-                    }];
+                    response._hints = [
+                        { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
+                        { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
+                    ];
                 }
 
                 return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
@@ -1101,6 +1097,10 @@ function createServer(): Server {
                 };
             }
             const flavour = args?.flavour === 'qgis' ? 'qgis' : 'earth';
+            if (flavour === 'qgis') {
+                log.warn("[KML] flavour='qgis' is deprecated and no longer advertised; " +
+                         'use export_geojson for QGIS and web maps');
+            }
             const kml = generateKml(entry.columns, entry.rows, flavour);
             return {
                 content: [{ type: 'text', text: kml }]

@@ -21,13 +21,13 @@ The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) an
 | **Detail lookups** | `get_licence_details`, `get_site_details` |
 | **Spectrum & narrative** | `search_spectrum_band`, `search_application_text`, `get_frequency_allocation` |
 | **SQL backend** | `execute_sql`, `list_sample_queries`, `explain_query` |
-| **Output** | `export_kml`, `export_geojson` (geospatial render of cached results) |
+| **Output** | `export_geojson` (QGIS, web maps), `export_kml` (Google Earth) |
 | **Meta / orchestration** | `sync_data`, `describe_schema`, `describe_tool`, `decode_emission_designator` |
 
 - `search_devices_by_emission` — Find devices/licences by decoded emission descriptor (modulation, info type, etc.). Accepts code letters or descriptions.
 - `decode_emission_designator` — Decode an ITU/ACA emission designator (e.g. 16K0F3E) into structured bandwidth/modulation/info fields.
 
-Search-style results return an `_hints` array suggesting plausible follow-up tools (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_kml`, `export_geojson`).
+Search-style results return an `_hints` array suggesting plausible follow-up tools (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_geojson` and `export_kml`).
 
 ## Installation
 

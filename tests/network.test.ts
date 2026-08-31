@@ -246,6 +246,40 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         return result.content[0].text as string;
     }
 
+    test('export_kml does not advertise the deprecated qgis flavour', async () => {
+        const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
+        const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+        await client.connect(transport);
+
+        const tools = await client.listTools();
+        const kml = tools.tools.find(t => t.name === 'export_kml')!;
+        // Hidden, not removed: the handler still honours flavour='qgis' for callers
+        // that already pass it, but nothing should discover it from the catalogue.
+        expect(Object.keys((kml.inputSchema as any).properties ?? {})).toEqual(['result_id']);
+
+        await transport.close();
+    });
+
+    test('geospatial results hint at both exporters, GeoJSON first', async () => {
+        // get_site_details is the path that carries the export hints; search_sites
+        // hints at get_site_details instead and has no top-level result_id, so
+        // asserting there would silently assert nothing. The test DB starts empty,
+        // so seed a site with a device rather than guarding on rows.length and
+        // quietly passing when there is nothing to check.
+        const fixtureDb = new Database(testDbPath);
+        try {
+            fixtureDb.prepare(`INSERT OR IGNORE INTO site(SITE_ID, NAME, LATITUDE, LONGITUDE, STATE, POSTCODE)
+                VALUES ('S-HINT', 'Hint Fixture Site', -27.5, 153.0, 'QLD', '4000')`).run();
+            fixtureDb.prepare(`INSERT OR IGNORE INTO device_details(SDD_ID, LICENCE_NO, EMISSION, FREQUENCY, SITE_ID)
+                VALUES (9101, 'TEST-L9', '16K0F3E', 150000000, 'S-HINT')`).run();
+        } finally { fixtureDb.close(); }
+
+        const details = JSON.parse(await callMcpTool('get_site_details', { site_id: 'S-HINT' }));
+        expect(details.result_id).toBeTruthy();
+        expect(details._hints.map((h: { tool: string }) => h.tool))
+            .toEqual(['export_geojson', 'export_kml']);
+    }, 20000);
+
     test('search_licences result includes _hints pointing at get_licence_details', async () => {
         const response = await callMcpTool('search_licences', { query: '1', limit: 1 });
         const parsed = JSON.parse(response);

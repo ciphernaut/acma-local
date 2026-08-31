@@ -51,7 +51,7 @@ The local SQLite database is kept in step with ACMA via the manifest at `https:/
 
 **Tool catalog (19 tools, registered in `index.ts`):** `search_sites`, `get_site_details`, `search_licences`, `get_licence_details`, `search_clients`, `search_bsl`, `search_spectrum_band`, `search_application_text`, `get_frequency_allocation`, `decode_emission_designator`, `search_devices_by_emission`, `sync_data`, `list_sample_queries`, `execute_sql`, `explain_query`, `export_kml`, `describe_schema`, `describe_tool`, `export_geojson`.
 
-Each tool's `tools/list` entry is a one-line summary + capability tag; the full markdown documentation lives in the `TOOL_DOCS` map and is fetched on demand via `describe_tool(name)`. Search-style tools return `{rows, _hints?}` envelopes — `_hints` carries follow-up tool suggestions (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_kml`).
+Each tool's `tools/list` entry is a one-line summary + capability tag; the full markdown documentation lives in the `TOOL_DOCS` map and is fetched on demand via `describe_tool(name)`. Search-style tools return `{rows, _hints?}` envelopes — `_hints` carries follow-up tool suggestions (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_geojson` for a GIS layer and `export_kml` for Google Earth). `export_kml`'s `flavour: 'qgis'` is deprecated and unadvertised but still works — see `docs/geospatial-export.md`.
 
 ### SQL execute path
 

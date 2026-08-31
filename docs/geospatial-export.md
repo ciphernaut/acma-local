@@ -5,6 +5,13 @@ share the column conventions below so the same query works with either.
 
 Pick by destination: **GeoJSON for QGIS and web maps, KML for Google Earth.**
 
+> **The KML `flavour: "qgis"` option is deprecated.** It still works and is still
+> tested — nothing calling it will break — but it is no longer advertised in
+> `tools/list` or offered as a route to a GIS, and using it logs a warning. The
+> table below is why: the things that make KML a poor GIS layer live in GDAL's
+> driver, not in the file, so writing better KML cannot fix them. There is no
+> removal date; it stays hidden until someone decides otherwise.
+
 ## Choosing a format
 
 | | KML (`flavour: "qgis"`) | GeoJSON |

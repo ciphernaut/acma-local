@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Deprecated
+- **`export_kml`'s `flavour: "qgis"`.** `export_geojson` is the supported route to a GIS. The flavour still works and is still tested — nothing calling it breaks — but it is no longer advertised in `tools/list`, no longer documented as a way to reach QGIS, and using it logs a warning. It stays hidden indefinitely; no removal date. The reasons KML makes a poor GIS layer live in GDAL's driver rather than in the file, so writing better KML cannot fix them — see `docs/geospatial-export.md`.
+- Geospatial `_hints` now offer both exporters, `export_geojson` first, then `export_kml` for Google Earth.
+
 ### Added
 - **`export_geojson`** renders a cached result as an RFC 7946 `FeatureCollection` — the format to use for QGIS and web maps. GDAL's LIBKML driver will not declare a layer geometry type and injects eleven boilerplate fields ahead of yours, which is a property of the driver rather than of the file, so no amount of care in the KML fixes it. Measured on the same 189-site export: GeoJSON reports `Geometry: Point` against KML's `Unknown (any)`, carries 12 fields against 26, and is 133 KB against 240 KB. Native JSON types, a `bbox` so viewers zoom to the data, and no `crs` member (the RFC fixes WGS 84).
 - **`docs/geospatial-export.md`** documents the column conventions both exporters share and how to choose between them.

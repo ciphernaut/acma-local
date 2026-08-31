@@ -91,6 +91,9 @@ describe('KML is usable as a GIS layer', () => {
 });
 
 describe('KML flavours', () => {
+    // 'qgis' is DEPRECATED and no longer advertised in tools/list — export_geojson
+    // is the supported route to a GIS. It stays implemented and tested so that
+    // anything already calling it keeps working; see docs/geospatial-export.md.
     const columns = ['NAME', 'LATITUDE', 'LONGITUDE', 'CHANNELS'];
     const rows = [['Site A', -29, 134, 20]];
 
@@ -100,7 +103,7 @@ describe('KML flavours', () => {
         expect(kml).toContain('<SimpleData name="CHANNELS">20</SimpleData>');
     });
 
-    it("'qgis' drops the balloon but keeps every attribute", () => {
+    it("'qgis' (deprecated, hidden) still drops the balloon and keeps every attribute", () => {
         const kml = generateKml(columns, rows, 'qgis');
         expect(kml).not.toContain('<table');
         expect(kml).toContain('<SimpleData name="CHANNELS">20</SimpleData>');
