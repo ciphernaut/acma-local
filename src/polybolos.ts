@@ -95,8 +95,8 @@ function agree(values: Array<string | number | boolean | null>): string | number
 }
 
 interface SiteArgs {
-    rows: unknown[][]; latI: number; lngI: number; siteI: number; nameI: number;
-    freqI: number; svcI: number; typeI: number; statI: number; stats?: ExportStats;
+    columns: string[]; lower: string[]; rows: unknown[][]; latI: number; lngI: number; siteI: number; nameI: number;
+    freqI: number; emisI: number; svcI: number; typeI: number; statI: number; stats?: ExportStats;
 }
 
 function projectSites(a: SiteArgs): Entity[] {
@@ -130,6 +130,24 @@ function projectSites(a: SiteArgs): Entity[] {
 
         const pick = (i: number) => i >= 0 ? agree(group.map(r => scalar(r[i]))) : null;
 
+        const properties: Record<string, string | number | boolean | null> = {
+            site_id: siteId,
+            device_count: group.length,
+            service: pick(a.svcI),
+            licence_type: pick(a.typeI),
+            status: pick(a.statI),
+            ...bands,
+        };
+
+        // Columns the exporter doesn't recognise ride along, aggregated with the same
+        // unanimous-value-or-'mixed' rule used for the first-class fields above — silently
+        // dropping a column the caller explicitly selected is not acceptable.
+        const claimed = new Set([a.latI, a.lngI, a.siteI, a.freqI, a.emisI, a.svcI, a.typeI, a.statI]);
+        for (let i = 0; i < a.columns.length; i++) {
+            if (claimed.has(i)) continue;
+            properties[a.lower[i]!] = pick(i);
+        }
+
         out.push({
             id: siteId,
             name: a.nameI >= 0 ? String(first[a.nameI] ?? `SITE-${siteId}`) : `SITE-${siteId}`,
@@ -139,22 +157,65 @@ function projectSites(a: SiteArgs): Entity[] {
             threat: 'NONE',              // never invent risk labels for civil licensees
             classification: 'UNCLASSIFIED',
             confidence: 1.0,             // the RRL is the authoritative register
-            properties: {
-                site_id: siteId,
-                device_count: group.length,
-                service: pick(a.svcI),
-                licence_type: pick(a.typeI),
-                status: pick(a.statI),
-                ...bands,
-            },
+            properties,
         });
     }
     return out;
 }
 
-/** Task 3 replaces this stub with emitter-level projection. */
-function projectEmitters(_a: unknown): Entity[] {
-    throw new Error('not implemented');
+interface EmitterArgs {
+    columns: string[]; rows: unknown[][]; lower: string[];
+    latI: number; lngI: number; sddI: number; nameI: number; freqI: number;
+    emisI: number; svcI: number; typeI: number; statI: number; stats?: ExportStats;
+}
+
+function projectEmitters(a: EmitterArgs): Entity[] {
+    // Columns already represented as first-class properties are not repeated in the passthrough.
+    const claimed = new Set([a.latI, a.lngI, a.sddI, a.freqI, a.emisI, a.svcI, a.typeI, a.statI]);
+
+    const out: Entity[] = [];
+    for (const row of a.rows) {
+        const pos = toLatLng(row[a.latI], row[a.lngI]);
+        const sddId = row[a.sddI];
+        if (!pos || sddId === null || sddId === undefined || sddId === '') {
+            if (a.stats) a.stats.skipped++;
+            continue;
+        }
+
+        const freq = a.freqI >= 0 ? Number(row[a.freqI]) : NaN;
+        const freqHz = Number.isNaN(freq) ? null : freq;
+
+        const properties: Record<string, string | number | boolean | null> = {
+            sdd_id: scalar(sddId),
+            frequency_hz: freqHz,
+            emission_class: a.emisI >= 0 ? emissionClass(row[a.emisI]) : null,
+            service: a.svcI >= 0 ? scalar(row[a.svcI]) : null,
+            licence_type: a.typeI >= 0 ? scalar(row[a.typeI]) : null,
+            status: a.statI >= 0 ? scalar(row[a.statI]) : null,
+            ...bandFlags(freqHz),
+        };
+
+        // Anything else the query selected rides along as a flat scalar.
+        for (let i = 0; i < a.columns.length; i++) {
+            if (claimed.has(i)) continue;
+            properties[a.lower[i]!] = scalar(row[i]);
+        }
+
+        out.push({
+            id: String(sddId),
+            name: freqHz !== null
+                ? `${(freqHz / 1e6).toFixed(4)} MHz${a.svcI >= 0 ? ` ${String(row[a.svcI] ?? '')}`.trimEnd() : ''}`
+                : `DEVICE-${String(sddId)}`,
+            domain: 'EW',
+            entityType: 'SIGNAL',
+            position: pos,
+            threat: 'NONE',
+            classification: 'UNCLASSIFIED',
+            confidence: 1.0,
+            properties,
+        });
+    }
+    return out;
 }
 
 export function generatePolybolos(
@@ -169,6 +230,7 @@ export function generatePolybolos(
     const latI  = idx(lower, 'latitude');
     const lngI  = idx(lower, 'longitude');
     const siteI = idx(lower, 'site_id');
+    const sddI  = idx(lower, 'sdd_id');
     const nameI = idx(lower, 'site_name', 'name');
     const freqI = idx(lower, 'frequency');
     const emisI = idx(lower, 'emission');
@@ -184,10 +246,13 @@ export function generatePolybolos(
     if (granularity === 'site' && siteI < 0) {
         throw new Error('Site-level projection needs a SITE_ID column. Select s.site_id, or use granularity "emitter".');
     }
+    if (granularity === 'emitter' && sddI < 0) {
+        throw new Error('Emitter-level projection needs an SDD_ID column (the device_details primary key). Select d.sdd_id.');
+    }
 
     const entities = granularity === 'site'
-        ? projectSites({ rows, latI, lngI, siteI, nameI, freqI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) })
-        : projectEmitters({ columns, rows, lower, latI, lngI, nameI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) });
+        ? projectSites({ columns, lower, rows, latI, lngI, siteI, nameI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) })
+        : projectEmitters({ columns, rows, lower, latI, lngI, sddI, nameI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) });
 
     if (entities.length > STREAM_CEILING) {
         throw new Error(

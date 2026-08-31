@@ -94,4 +94,78 @@ describe('generatePolybolos — site level', () => {
         expect(() => generatePolybolos(COLS, rows))
             .toThrow(/ceiling/i);
     });
+
+    it('passes an unrecognised column through as a flat property', () => {
+        const cols = [...COLS, 'INDUSTRY_CAT_NAME'];
+        const p = parse(cols, [
+            [7, 'Shared Tower', -27, 153, 150000000, 'Land Mobile', 'Broadcasting'],
+            [7, 'Shared Tower', -27, 153, 450000000, 'Land Mobile', 'Broadcasting'],
+        ]);
+        expect(p.entities[0].properties.industry_cat_name).toBe('Broadcasting');
+    });
+
+    it('marks a passed-through column "mixed" when the site group disagrees', () => {
+        const cols = [...COLS, 'INDUSTRY_CAT_NAME'];
+        const p = parse(cols, [
+            [7, 'Shared Tower', -27, 153, 150000000, 'Land Mobile', 'Broadcasting'],
+            [7, 'Shared Tower', -27, 153, 450000000, 'Land Mobile', 'Aviation'],
+        ]);
+        expect(p.entities[0].properties.industry_cat_name).toBe('mixed');
+    });
+});
+
+const ECOLS = ['SDD_ID', 'LICENCE_NO', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'EMISSION', 'SV_NAME'];
+
+describe('generatePolybolos — emitter level', () => {
+    const one = [[901, '1234567/1', 'Mt Coot-tha', -27.47, 152.95, 150000000, '16K0F3E', 'Land Mobile']];
+
+    it('uses the SIGNAL/EW ontology slots', () => {
+        const p = parse(ECOLS, one, { granularity: 'emitter' });
+        expect(p.entities[0].entityType).toBe('SIGNAL');
+        expect(p.entities[0].domain).toBe('EW');
+    });
+
+    it('keys on SDD_ID, the device_details primary key', () => {
+        const p = parse(ECOLS, one, { granularity: 'emitter' });
+        expect(p.entities[0].id).toBe('901');
+    });
+
+    it('does NOT collapse devices — one row is one entity', () => {
+        const rows = [
+            [901, '1234567/1', 'Shared', -27, 153, 150000000, '16K0F3E', 'Land Mobile'],
+            [902, '1234567/1', 'Shared', -27, 153, 450000000, '16K0F3E', 'Land Mobile'],
+        ];
+        const p = parse(ECOLS, rows, { granularity: 'emitter' });
+        expect(p.entities).toHaveLength(2);
+    });
+
+    it('carries the exact frequency, not a band bucket', () => {
+        const p = parse(ECOLS, one, { granularity: 'emitter' });
+        expect(p.entities[0].properties.frequency_hz).toBe(150000000);
+    });
+
+    it('derives a coarse emission class from the designator', () => {
+        const p = parse(ECOLS, one, { granularity: 'emitter' });
+        // 16K0F3E → F is frequency modulation, whose group is 'angle'.
+        expect(p.entities[0].properties.emission_class).toBe('angle');
+    });
+
+    it('tolerates a missing or malformed emission designator', () => {
+        const rows = [[901, '1234567/1', 'A', -27, 153, 150000000, '', 'Land Mobile']];
+        const p = parse(ECOLS, rows, { granularity: 'emitter' });
+        expect(p.entities[0].properties.emission_class).toBeNull();
+    });
+
+    it('requires SDD_ID so ids stay stable across pushes', () => {
+        const cols = ['LATITUDE', 'LONGITUDE', 'FREQUENCY'];
+        expect(() => generatePolybolos(cols, [[-27, 153, 150000000]], { granularity: 'emitter' }))
+            .toThrow(/SDD_ID/i);
+    });
+
+    it('emits only scalar properties', () => {
+        const p = parse(ECOLS, one, { granularity: 'emitter' });
+        for (const value of Object.values(p.entities[0].properties)) {
+            expect(typeof value === 'object' && value !== null).toBe(false);
+        }
+    });
 });
