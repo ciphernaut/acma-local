@@ -2,13 +2,7 @@
  * ACMA RRL MCP Server - Network Mode
  *
  * Per-session StreamableHTTPServerTransport (official MCP multi-client pattern).
- * Full tool catalog: search_sites, search_licences, search_clients,
- *                    get_licence_details, get_site_details, sync_data,
- *                    execute_sql, list_sample_queries, export_kml,
- *                    search_bsl, search_spectrum_band, search_application_text,
- *                    describe_schema, describe_tool, explain_query,
- *                    get_frequency_allocation, decode_emission_designator,
- *                    search_devices_by_emission.
+ * Full tool catalog: see TOOL_CATALOG below (served verbatim by tools/list).
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -582,6 +576,283 @@ function openDb() {
     return new Database(dbPath, { readonly: true });
 }
 
+/**
+ * Single source of truth for the tool catalog: served verbatim by tools/list
+ * and used to build the startup banner, so the two cannot drift apart.
+ */
+const TOOL_CATALOG = [
+    {
+        name: 'search_licences',
+        description: TOOL_DOCS.search_licences!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'Licence number or partial number, e.g. "1191324"' },
+                limit: { type: 'number', description: 'Max results (default 10)' },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'get_licence_details',
+        description: TOOL_DOCS.get_licence_details!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                licence_no: { type: 'string', description: 'Exact licence number, e.g. "1191324/1"' },
+            },
+            required: ['licence_no'],
+        },
+    },
+    {
+        name: 'search_sites',
+        description: TOOL_DOCS.search_sites!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'Site name or postcode' },
+                limit: { type: 'number', description: 'Max results (default 10)' },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'get_site_details',
+        description: TOOL_DOCS.get_site_details!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                site_id: { type: 'string', description: 'Site ID, e.g. "124"' },
+            },
+            required: ['site_id'],
+        },
+    },
+    {
+        name: 'search_clients',
+        description: TOOL_DOCS.search_clients!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'Licensee or trading name' },
+                limit: { type: 'number', description: 'Max results (default 10)' },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'search_bsl',
+        description: TOOL_DOCS.search_bsl!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'CALL_SIGN, BSL_NO, or ON_AIR_ID' },
+                limit: { type: 'number', description: 'Max rows (default 10)' },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'search_spectrum_band',
+        description: TOOL_DOCS.search_spectrum_band!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                freq_min_hz: { type: 'number', description: 'Lower bound (Hz)' },
+                freq_max_hz: { type: 'number', description: 'Upper bound (Hz)' },
+                limit:       { type: 'number', description: 'Max rows (default 20)' },
+            },
+            required: ['freq_min_hz', 'freq_max_hz'],
+        },
+    },
+    {
+        name: 'search_application_text',
+        description: TOOL_DOCS.search_application_text!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'FTS5 query string' },
+                limit: { type: 'number', description: 'Max rows (default 20)' },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'sync_data',
+        description: TOOL_DOCS.sync_data!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                mode: {
+                    type: 'string',
+                    enum: ['auto', 'full'],
+                    description:
+                        "'auto' (default) applies incremental change-zips only. " +
+                        "'full' force-pulls and reimports the ~70 MB full extract — " +
+                        "use after a long offline period or to recover from gap-exceeded.",
+                },
+            },
+        },
+    },
+    {
+        name: 'list_sample_queries',
+        description: TOOL_DOCS.list_sample_queries!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                category: {
+                    type: 'string',
+                    enum: ['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict'],
+                    description: 'Filter to one category',
+                },
+                name: {
+                    type: 'string',
+                    description: 'Substring match on description',
+                },
+            },
+        },
+    },
+    {
+        name: 'describe_schema',
+        description: TOOL_DOCS.describe_schema!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                tables: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional list of table names (case-insensitive); omit for all.',
+                },
+            },
+        },
+    },
+    {
+        name: 'explain_query',
+        description: TOOL_DOCS.explain_query!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                sql: { type: 'string', description: 'A SELECT or WITH ... SELECT statement' },
+            },
+            required: ['sql'],
+        },
+    },
+    {
+        name: 'execute_sql',
+        description: TOOL_DOCS.execute_sql!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                sql: {
+                    type: 'string',
+                    description: 'A SELECT SQL query to run against the ACMA RRL database',
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Max rows to return (default 100, max 500)',
+                },
+            },
+            required: ['sql'],
+        },
+    },
+    {
+        name: 'export_kml',
+        description: TOOL_DOCS.export_kml!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                // `flavour` is deliberately NOT advertised. 'qgis' still works
+                // for existing callers, but export_geojson is the supported
+                // route to a GIS — see docs/geospatial-export.md.
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+            },
+            required: ['result_id'],
+        },
+    },
+    {
+        name: 'export_geojson',
+        description: TOOL_DOCS.export_geojson!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+            },
+            required: ['result_id'],
+        },
+    },
+    {
+        name: 'export_qml',
+        description: TOOL_DOCS.export_qml!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                label_field: { type: 'string', description: 'Column to label features with (default: NAME, else the first text column)' },
+                fields: { type: 'array', items: { type: 'string' }, description: 'Subset of columns for the map tip (default: all)' },
+            },
+            required: ['result_id'],
+        },
+    },
+    {
+        name: 'describe_tool',
+        description: TOOL_DOCS.describe_tool!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                name: { type: 'string', description: 'Exact tool name (case-sensitive)' },
+            },
+            required: ['name'],
+        },
+    },
+    {
+        name: 'get_frequency_allocation',
+        description: TOOL_DOCS.get_frequency_allocation!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                freq_hz: {
+                    type: 'number',
+                    description: 'Frequency in Hz. Examples: 87100000 (87.1 MHz), 2400000000 (2.4 GHz).',
+                },
+                include_footnotes: {
+                    type: 'boolean',
+                    description: 'If true (default), include full footnote text.',
+                },
+            },
+            required: ['freq_hz'],
+        },
+    },
+    {
+        name: 'decode_emission_designator',
+        description: TOOL_DOCS.decode_emission_designator!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                code: { type: 'string', description: 'Emission designator, e.g. 16K0F3E or 10M0W7D' },
+            },
+            required: ['code'],
+        },
+    },
+    {
+        name: 'search_devices_by_emission',
+        description: TOOL_DOCS.search_devices_by_emission!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                modulation:       { type: 'string', description: "Code letter (e.g. 'R', 'F') or description substring (e.g. 'reduced', 'frequency modulation')" },
+                signal_nature:    { type: 'string', description: "Code digit (e.g. '3') or description substring" },
+                info_type:        { type: 'string', description: "Code letter (e.g. 'C', 'E') or description substring (e.g. 'facsimile', 'telephony')" },
+                signal_detail:    { type: 'string', description: 'Optional. Code letter or description substring.' },
+                multiplex:        { type: 'string', description: 'Optional. Code letter or description substring.' },
+                min_bandwidth_hz: { type: 'number',  description: 'Lower bound on parsed bandwidth (inclusive).' },
+                max_bandwidth_hz: { type: 'number',  description: 'Upper bound on parsed bandwidth (inclusive).' },
+                licence_no:       { type: 'string',  description: 'Restrict to one licence.' },
+                state:            { type: 'string',  description: "State code from the joined site row (e.g. 'NSW')." },
+                limit:            { type: 'integer', description: 'Default 100, max 500.' },
+            },
+        },
+    },
+];
+
 function createServer(): Server {
     const server = new Server(
         { name: 'acma-rrl-server', version: '1.11.0' },
@@ -591,278 +862,7 @@ function createServer(): Server {
     // ─── Tool Catalog ───────────────────────────────────────────────────────────
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [
-            {
-                name: 'search_licences',
-                description: TOOL_DOCS.search_licences!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        query: { type: 'string', description: 'Licence number or partial number, e.g. "1191324"' },
-                        limit: { type: 'number', description: 'Max results (default 10)' },
-                    },
-                    required: ['query'],
-                },
-            },
-            {
-                name: 'get_licence_details',
-                description: TOOL_DOCS.get_licence_details!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        licence_no: { type: 'string', description: 'Exact licence number, e.g. "1191324/1"' },
-                    },
-                    required: ['licence_no'],
-                },
-            },
-            {
-                name: 'search_sites',
-                description: TOOL_DOCS.search_sites!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        query: { type: 'string', description: 'Site name or postcode' },
-                        limit: { type: 'number', description: 'Max results (default 10)' },
-                    },
-                    required: ['query'],
-                },
-            },
-            {
-                name: 'get_site_details',
-                description: TOOL_DOCS.get_site_details!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        site_id: { type: 'string', description: 'Site ID, e.g. "124"' },
-                    },
-                    required: ['site_id'],
-                },
-            },
-            {
-                name: 'search_clients',
-                description: TOOL_DOCS.search_clients!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        query: { type: 'string', description: 'Licensee or trading name' },
-                        limit: { type: 'number', description: 'Max results (default 10)' },
-                    },
-                    required: ['query'],
-                },
-            },
-            {
-                name: 'search_bsl',
-                description: TOOL_DOCS.search_bsl!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        query: { type: 'string', description: 'CALL_SIGN, BSL_NO, or ON_AIR_ID' },
-                        limit: { type: 'number', description: 'Max rows (default 10)' },
-                    },
-                    required: ['query'],
-                },
-            },
-            {
-                name: 'search_spectrum_band',
-                description: TOOL_DOCS.search_spectrum_band!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        freq_min_hz: { type: 'number', description: 'Lower bound (Hz)' },
-                        freq_max_hz: { type: 'number', description: 'Upper bound (Hz)' },
-                        limit:       { type: 'number', description: 'Max rows (default 20)' },
-                    },
-                    required: ['freq_min_hz', 'freq_max_hz'],
-                },
-            },
-            {
-                name: 'search_application_text',
-                description: TOOL_DOCS.search_application_text!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        query: { type: 'string', description: 'FTS5 query string' },
-                        limit: { type: 'number', description: 'Max rows (default 20)' },
-                    },
-                    required: ['query'],
-                },
-            },
-            {
-                name: 'sync_data',
-                description: TOOL_DOCS.sync_data!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        mode: {
-                            type: 'string',
-                            enum: ['auto', 'full'],
-                            description:
-                                "'auto' (default) applies incremental change-zips only. " +
-                                "'full' force-pulls and reimports the ~70 MB full extract — " +
-                                "use after a long offline period or to recover from gap-exceeded.",
-                        },
-                    },
-                },
-            },
-            {
-                name: 'list_sample_queries',
-                description: TOOL_DOCS.list_sample_queries!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        category: {
-                            type: 'string',
-                            enum: ['lookup', 'statistics', 'geospatial', 'text-search', 'power-user', 'data-dict'],
-                            description: 'Filter to one category',
-                        },
-                        name: {
-                            type: 'string',
-                            description: 'Substring match on description',
-                        },
-                    },
-                },
-            },
-            {
-                name: 'describe_schema',
-                description: TOOL_DOCS.describe_schema!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        tables: {
-                            type: 'array',
-                            items: { type: 'string' },
-                            description: 'Optional list of table names (case-insensitive); omit for all.',
-                        },
-                    },
-                },
-            },
-            {
-                name: 'explain_query',
-                description: TOOL_DOCS.explain_query!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        sql: { type: 'string', description: 'A SELECT or WITH ... SELECT statement' },
-                    },
-                    required: ['sql'],
-                },
-            },
-            {
-                name: 'execute_sql',
-                description: TOOL_DOCS.execute_sql!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        sql: {
-                            type: 'string',
-                            description: 'A SELECT SQL query to run against the ACMA RRL database',
-                        },
-                        limit: {
-                            type: 'number',
-                            description: 'Max rows to return (default 100, max 500)',
-                        },
-                    },
-                    required: ['sql'],
-                },
-            },
-            {
-                name: 'export_kml',
-                description: TOOL_DOCS.export_kml!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        // `flavour` is deliberately NOT advertised. 'qgis' still works
-                        // for existing callers, but export_geojson is the supported
-                        // route to a GIS — see docs/geospatial-export.md.
-                        result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                    },
-                    required: ['result_id'],
-                },
-            },
-            {
-                name: 'export_geojson',
-                description: TOOL_DOCS.export_geojson!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                    },
-                    required: ['result_id'],
-                },
-            },
-            {
-                name: 'export_qml',
-                description: TOOL_DOCS.export_qml!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                        label_field: { type: 'string', description: 'Column to label features with (default: NAME, else the first text column)' },
-                        fields: { type: 'array', items: { type: 'string' }, description: 'Subset of columns for the map tip (default: all)' },
-                    },
-                    required: ['result_id'],
-                },
-            },
-            {
-                name: 'describe_tool',
-                description: TOOL_DOCS.describe_tool!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        name: { type: 'string', description: 'Exact tool name (case-sensitive)' },
-                    },
-                    required: ['name'],
-                },
-            },
-            {
-                name: 'get_frequency_allocation',
-                description: TOOL_DOCS.get_frequency_allocation!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        freq_hz: {
-                            type: 'number',
-                            description: 'Frequency in Hz. Examples: 87100000 (87.1 MHz), 2400000000 (2.4 GHz).',
-                        },
-                        include_footnotes: {
-                            type: 'boolean',
-                            description: 'If true (default), include full footnote text.',
-                        },
-                    },
-                    required: ['freq_hz'],
-                },
-            },
-            {
-                name: 'decode_emission_designator',
-                description: TOOL_DOCS.decode_emission_designator!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        code: { type: 'string', description: 'Emission designator, e.g. 16K0F3E or 10M0W7D' },
-                    },
-                    required: ['code'],
-                },
-            },
-            {
-                name: 'search_devices_by_emission',
-                description: TOOL_DOCS.search_devices_by_emission!.summary,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        modulation:       { type: 'string', description: "Code letter (e.g. 'R', 'F') or description substring (e.g. 'reduced', 'frequency modulation')" },
-                        signal_nature:    { type: 'string', description: "Code digit (e.g. '3') or description substring" },
-                        info_type:        { type: 'string', description: "Code letter (e.g. 'C', 'E') or description substring (e.g. 'facsimile', 'telephony')" },
-                        signal_detail:    { type: 'string', description: 'Optional. Code letter or description substring.' },
-                        multiplex:        { type: 'string', description: 'Optional. Code letter or description substring.' },
-                        min_bandwidth_hz: { type: 'number',  description: 'Lower bound on parsed bandwidth (inclusive).' },
-                        max_bandwidth_hz: { type: 'number',  description: 'Upper bound on parsed bandwidth (inclusive).' },
-                        licence_no:       { type: 'string',  description: 'Restrict to one licence.' },
-                        state:            { type: 'string',  description: "State code from the joined site row (e.g. 'NSW')." },
-                        limit:            { type: 'integer', description: 'Default 100, max 500.' },
-                    },
-                },
-            },
-        ],
+        tools: TOOL_CATALOG,
     }));
 
     // ─── Tool Handlers ──────────────────────────────────────────────────────────
@@ -1407,7 +1407,7 @@ async function main() {
     const port = Number(PORT);
     const httpServer = app.listen(port, '0.0.0.0', () => {
         log.info(`ACMA RRL MCP Server v1.11.0 running on port ${port} at http://localhost:${port}/mcp`);
-        log.info('Tools: search_licences, get_licence_details, search_sites, get_site_details, search_clients, sync_data, execute_sql, list_sample_queries, export_kml, search_bsl, search_spectrum_band, search_application_text, get_frequency_allocation, describe_schema, describe_tool, explain_query, decode_emission_designator, search_devices_by_emission');
+        log.info(`Tools (${TOOL_CATALOG.length}): ${TOOL_CATALOG.map((t) => t.name).join(', ')}`);
     });
 
     // Graceful shutdown on SIGTERM (systemd / docker stop) and SIGINT (Ctrl-C).
