@@ -1,7 +1,11 @@
 # Geospatial export contract
 
-`export_kml` and `export_geojson` render a cached query result as a map layer. They
-share the column conventions below so the same query works with either.
+`export_kml` and `export_geojson` render a cached query result as a map layer;
+`export_qml` renders the matching QGIS *style*. All three read the same
+`result_id`, so one query gives you data and presentation that agree.
+
+The data exporters share the column conventions below, so the same query works with
+either.
 
 Pick by destination: **GeoJSON for QGIS and web maps, KML for Google Earth.**
 
@@ -58,6 +62,31 @@ placemark title; GeoJSON has no title concept, so there it is an ordinary proper
 - **Property names are used verbatim**, including spaces or punctuation, since JSON
   keys are unrestricted. KML sanitises them to `[A-Za-z0-9_]` for XML.
 - An empty result is a valid empty `FeatureCollection`, not an error.
+
+## Styling a QGIS layer
+
+`export_qml` generates a `.qml` for the same cached result. Save it beside the data
+file with the **same basename** and QGIS applies it on load:
+
+    stations.geojson  +  stations.qml
+
+It sets a point symbol, labels (from `NAME`, else the first column holding text) and
+a **map tip** listing every attribute — the piece people miss, because QGIS shows
+nothing on click by default; attributes otherwise live in the attribute table (F6)
+or behind the Identify tool.
+
+One step it cannot do for you: map tips are a QGIS-wide toggle, not a layer setting.
+Turn them on once with **View > Show Map Tips**.
+
+The same style works over a KML layer too, since KML `ExtendedData` keeps the field
+names.
+
+**What is and is not verified.** The generator is tested for well-formed XML,
+correct escaping, field names that cannot break expression syntax, and a map tip
+that references exactly the result's columns. Nothing tests how it *renders* —
+there is no QGIS in CI — and the file is written against the QGIS 3.28 schema, so
+schema drift in a future major is a real residual risk. If a style ever looks wrong,
+delete the `.qml`; the data is untouched.
 
 ## Row limits
 

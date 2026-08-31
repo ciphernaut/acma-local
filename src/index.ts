@@ -34,6 +34,7 @@ import {
 import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery } from './sql.js';
 import { generateKml } from './kml.js';
 import { generateGeoJson } from './geojson.js';
+import { generateQml } from './qml.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
 import { searchDevicesByEmission } from './emissions_search.js';
@@ -301,6 +302,44 @@ unrounded. See docs/geospatial-export.md.
 
 ## Input
 - result_id: the result_id returned by the previous tool call`,
+    },
+    export_qml: {
+        summary: '[QGIS] Generate a .qml layer style for a cached result — labels and a hover map tip.',
+        tags: ['geospatial'],
+        fullDescription: `
+### [QGIS Layer Style]
+Generate a QGIS .qml style for the same cached result you exported as data.
+
+## Why you want this
+QGIS shows nothing on click by default — attributes live in the attribute table
+(F6) or behind the Identify tool. This builds the map tip so hovering a feature
+shows its details, which is the piece people expect and have to hand-write.
+
+## Save it beside the data, same basename
+QGIS applies a .qml automatically when the names match:
+    stations.geojson  +  stations.qml
+To drop it: delete the file, or Layer Properties > Style > Restore Default.
+
+## One step this cannot do for you
+Map tips are a QGIS-wide toggle, not a layer setting. Turn them on once with
+View > Show Map Tips, or the tip never appears however the file is written.
+
+## What it generates
+- a point symbol
+- labels from NAME, else the first column holding text, else no labelling
+- a map tip listing every attribute column, first column as the heading
+
+Works for a GeoJSON or a KML layer: KML ExtendedData keeps the same field names.
+
+## Input
+- result_id: the result_id returned by the previous tool call
+- label_field: column to label with (default: NAME, else first text column)
+- fields: subset of columns for the map tip (default: all)
+
+## Caveat
+Written against the QGIS 3.28 schema. It is XML-validated and every field it
+references is checked against the result's columns, but nothing here verifies how
+it RENDERS — there is no QGIS in the test environment.`,
     },
     describe_schema: {
         summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
@@ -752,6 +791,19 @@ function createServer(): Server {
                 },
             },
             {
+                name: 'export_qml',
+                description: TOOL_DOCS.export_qml!.summary,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                        label_field: { type: 'string', description: 'Column to label features with (default: NAME, else the first text column)' },
+                        fields: { type: 'array', items: { type: 'string' }, description: 'Subset of columns for the map tip (default: all)' },
+                    },
+                    required: ['result_id'],
+                },
+            },
+            {
                 name: 'describe_tool',
                 description: TOOL_DOCS.describe_tool!.summary,
                 inputSchema: {
@@ -856,6 +908,7 @@ function createServer(): Server {
                     response._hints = [
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
+                        { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
                     ];
                 }
 
@@ -911,6 +964,7 @@ function createServer(): Server {
                     response._hints = [
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
+                        { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
                     ];
                 }
 
@@ -1069,6 +1123,7 @@ function createServer(): Server {
                     response._hints = [
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
+                        { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
                     ];
                 }
 
@@ -1124,6 +1179,29 @@ function createServer(): Server {
             }
             return {
                 content: [{ type: 'text', text: generateGeoJson(entry.columns, entry.rows) }]
+            };
+        }
+
+        if (name === 'export_qml') {
+            const id = args?.result_id as string | undefined;
+            if (!id) {
+                return {
+                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
+                    isError: true,
+                };
+            }
+            const entry = resultCache.get(id);
+            if (!entry) {
+                return {
+                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
+                    isError: true,
+                };
+            }
+            const opts: { labelField?: string; fields?: string[] } = {};
+            if (typeof args?.label_field === 'string') opts.labelField = args.label_field;
+            if (Array.isArray(args?.fields)) opts.fields = (args.fields as unknown[]).map(String);
+            return {
+                content: [{ type: 'text', text: generateQml(entry.columns, entry.rows, opts) }]
             };
         }
 

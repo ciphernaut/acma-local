@@ -233,7 +233,7 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         await transport.close();
     }, 15000);
 
-    test('tools/list advertises the full 19-tool catalog', async () => {
+    test('tools/list advertises the full 20-tool catalog', async () => {
         const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${PORT}/mcp`));
         const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
         await client.connect(transport);
@@ -245,7 +245,8 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         expect(tools.tools.some(t => t.name === 'decode_emission_designator')).toBe(true);
         expect(tools.tools.some(t => t.name === 'search_devices_by_emission')).toBe(true);
         expect(tools.tools.some(t => t.name === 'export_geojson')).toBe(true);
-        expect(tools.tools.length).toBe(19);
+        expect(tools.tools.some(t => t.name === 'export_qml')).toBe(true);
+        expect(tools.tools.length).toBe(20);
 
         await transport.close();
     }, 15000);
@@ -292,7 +293,7 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         const details = JSON.parse(await callMcpTool('get_site_details', { site_id: 'S-HINT' }));
         expect(details.result_id).toBeTruthy();
         expect(details._hints.map((h: { tool: string }) => h.tool))
-            .toEqual(['export_geojson', 'export_kml']);
+            .toEqual(['export_geojson', 'export_kml', 'export_qml']);
     }, 20000);
 
     test('search_licences result includes _hints pointing at get_licence_details', async () => {
