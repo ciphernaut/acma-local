@@ -54,7 +54,14 @@ ${attrIdx.map(i => `      <SimpleField type="${inferType(rows, i)}" name="${fiel
         if (!geometryKml && latIdx >= 0 && lngIdx >= 0) {
             const lat = Number(row[latIdx]);
             const lng = Number(row[lngIdx]);
-            if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+            // Range-check rather than reject zeros: 0 is a real coordinate, and
+            // discarding it silently drops rows. Out-of-range values are the junk
+            // worth catching. Matches generateGeoJson — docs/geospatial-export.md.
+            const usable = !isNaN(lat) && !isNaN(lng)
+                && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+                && row[latIdx] !== null && row[latIdx] !== '' 
+                && row[lngIdx] !== null && row[lngIdx] !== '';
+            if (usable) {
                 geometryKml = `<Point><coordinates>${lng},${lat}</coordinates></Point>`;
             }
         }

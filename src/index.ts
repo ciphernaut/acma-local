@@ -33,6 +33,7 @@ import {
 } from './logic.js';
 import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery } from './sql.js';
 import { generateKml } from './kml.js';
+import { generateGeoJson } from './geojson.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
 import { searchDevicesByEmission } from './emissions_search.js';
@@ -264,6 +265,41 @@ that markup is most of the file size. Keep the default 'earth' for Google Earth.
 ## Input
 - result_id: the result_id returned by the previous tool call
 - flavour: 'earth' (default) or 'qgis'`,
+    },
+    export_geojson: {
+        summary: '[GeoJSON] Render a previously-cached query result as RFC 7946 GeoJSON (best for QGIS).',
+        tags: ['geospatial'],
+        fullDescription: `
+### [GeoJSON Export]
+Generate an RFC 7946 FeatureCollection from cached query results.
+
+## Usage
+- Call this AFTER running a query that returned a result_id, exactly like export_kml
+- Prefer this over export_kml for QGIS and web maps
+
+## Why this rather than KML
+GDAL's LIBKML driver will not declare a layer geometry type for KML and injects
+eleven boilerplate fields (id, description, timestamp, begin, end, altitudeMode,
+tessellate, extrude, visibility, drawOrder, icon) ahead of yours. That is a property
+of the driver, not of the file, so no amount of care in the KML fixes it. GeoJSON
+reports a real geometry type, carries only your columns, uses native JSON types, and
+is less than half the size. Use export_kml when the destination is Google Earth.
+
+## Conventions (shared with export_kml)
+- Geometry comes from a GEOMETRY column holding WKT, else LATITUDE + LONGITUDE
+- Column names are matched case-insensitively; every other column becomes a property
+- Rows with no usable geometry are skipped rather than emitted with null geometry
+- A coordinate must be numeric and in range (lat -90..90, lon -180..180). Zero is a
+  real coordinate and is kept; junk and nulls are dropped
+- NAME has no special role here, unlike the KML placemark title
+
+## Output
+A FeatureCollection with a bbox covering the features, so a viewer zooms to the data.
+No crs member: RFC 7946 fixes the CRS as WGS 84. Coordinates are passed through
+unrounded. See docs/geospatial-export.md.
+
+## Input
+- result_id: the result_id returned by the previous tool call`,
     },
     describe_schema: {
         summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
@@ -706,6 +742,17 @@ function createServer(): Server {
                 },
             },
             {
+                name: 'export_geojson',
+                description: TOOL_DOCS.export_geojson!.summary,
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                    },
+                    required: ['result_id'],
+                },
+            },
+            {
                 name: 'describe_tool',
                 description: TOOL_DOCS.describe_tool!.summary,
                 inputSchema: {
@@ -1057,6 +1104,26 @@ function createServer(): Server {
             const kml = generateKml(entry.columns, entry.rows, flavour);
             return {
                 content: [{ type: 'text', text: kml }]
+            };
+        }
+
+        if (name === 'export_geojson') {
+            const id = args?.result_id as string | undefined;
+            if (!id) {
+                return {
+                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
+                    isError: true,
+                };
+            }
+            const entry = resultCache.get(id);
+            if (!entry) {
+                return {
+                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
+                    isError: true,
+                };
+            }
+            return {
+                content: [{ type: 'text', text: generateGeoJson(entry.columns, entry.rows) }]
             };
         }
 

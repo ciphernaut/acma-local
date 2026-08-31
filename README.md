@@ -2,18 +2,18 @@
 
 A Model Context Protocol (MCP) server that exposes the Australian Communications and Media Authority (ACMA) [Register of Radiocommunications Licences (RRL)](https://www.acma.gov.au/radiocomms-licence-data) and the [Australian Radiofrequency Spectrum Plan (ARSP)](https://www.acma.gov.au/australian-radiofrequency-spectrum-plan) as a local SQLite mirror, with manifest-driven sync against ACMA's REST API.
 
-The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) and **Streamable HTTP/SSE** on `:3000` (LM Studio 0.3.17+, networked MCP hosts). Both modes share the same 18-tool catalog.
+The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) and **Streamable HTTP/SSE** on `:3000` (LM Studio 0.3.17+, networked MCP hosts). Both modes share the same 19-tool catalog.
 
 ## Features
 
 - **Local mirror** of the full RRL dataset (32 materialised tables + FTS5 narrative index), kept fresh by ACMA's `/v1/Extracts` manifest API — mobile-friendly by default (no automatic 70 MB downloads).
 - **Full-text search** (SQLite FTS5) over application narrative — answers "which licences mention 'remote operation'?" in milliseconds.
-- **Geospatial export** — site/device results carry coordinates and can be rendered as KML via `export_kml`.
+- **Geospatial export** — site/device results carry coordinates and can be rendered as a map layer: `export_geojson` for QGIS and web maps, `export_kml` for Google Earth. See [`docs/geospatial-export.md`](docs/geospatial-export.md) for the shared column conventions and how to choose.
 - **Spectrum plan lookup** — `get_frequency_allocation(freq_hz)` returns the AU primary allocation plus ITU Region 1/2/3 contrast rows and resolved footnote text. Rebuilt from the 2025 compilation of the ACMA Spectrum Plan (`F2025C01105`); seeded from `seed/spectrum_plan.sql`. See [`docs/spectrum-provenance.md`](docs/spectrum-provenance.md) to reproduce the seed or to review where it departs from the source document and why.
 - **Power-user SQL** — `execute_sql` runs sandboxed SELECT/WITH queries in a worker thread; `explain_query`, `describe_schema`, and `list_sample_queries` make the schema discoverable.
 - **Progressive disclosure** — `tools/list` returns terse one-liners; `describe_tool(<name>)` fetches the full markdown when needed (matterfront pattern).
 
-## Tools (18)
+## Tools (19)
 
 | Group | Tools |
 |---|---|
@@ -21,13 +21,13 @@ The server speaks two transports: **stdio** (Claude Desktop, LM Studio local) an
 | **Detail lookups** | `get_licence_details`, `get_site_details` |
 | **Spectrum & narrative** | `search_spectrum_band`, `search_application_text`, `get_frequency_allocation` |
 | **SQL backend** | `execute_sql`, `list_sample_queries`, `explain_query` |
-| **Output** | `export_kml` (geospatial render of cached results) |
+| **Output** | `export_kml`, `export_geojson` (geospatial render of cached results) |
 | **Meta / orchestration** | `sync_data`, `describe_schema`, `describe_tool`, `decode_emission_designator` |
 
 - `search_devices_by_emission` — Find devices/licences by decoded emission descriptor (modulation, info type, etc.). Accepts code letters or descriptions.
 - `decode_emission_designator` — Decode an ITU/ACA emission designator (e.g. 16K0F3E) into structured bandwidth/modulation/info fields.
 
-Search-style results return an `_hints` array suggesting plausible follow-up tools (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_kml`).
+Search-style results return an `_hints` array suggesting plausible follow-up tools (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_kml`, `export_geojson`).
 
 ## Installation
 

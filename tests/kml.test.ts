@@ -126,3 +126,18 @@ describe('KML flavours', () => {
         expect(qgis.length).toBeLessThan(earth.length * 0.7);
     });
 });
+
+describe('KML coordinate validation matches GeoJSON', () => {
+    it('keeps a legitimate zero coordinate', () => {
+        const kml = generateKml(['NAME', 'LATITUDE', 'LONGITUDE'], [['Null Island', 0, 0]]);
+        expect(kml).toContain('<coordinates>0,0</coordinates>');
+    });
+
+    it('skips out-of-range or unusable coordinates', () => {
+        const kml = generateKml(['NAME', 'LATITUDE', 'LONGITUDE'], [
+            ['ok', -29, 134], ['bad lat', 91, 134], ['null', null, 134], ['text', 'abc', 134],
+        ]);
+        expect((kml.match(/<Placemark>/g) ?? [])).toHaveLength(1);
+        expect(kml).toContain('<![CDATA[ok]]>');
+    });
+});

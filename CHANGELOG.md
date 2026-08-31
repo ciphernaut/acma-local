@@ -5,11 +5,14 @@ All notable changes to this project are documented here. Format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- **`export_geojson`** renders a cached result as an RFC 7946 `FeatureCollection` — the format to use for QGIS and web maps. GDAL's LIBKML driver will not declare a layer geometry type and injects eleven boilerplate fields ahead of yours, which is a property of the driver rather than of the file, so no amount of care in the KML fixes it. Measured on the same 189-site export: GeoJSON reports `Geometry: Point` against KML's `Unknown (any)`, carries 12 fields against 26, and is 133 KB against 240 KB. Native JSON types, a `bbox` so viewers zoom to the data, and no `crs` member (the RFC fixes WGS 84).
+- **`docs/geospatial-export.md`** documents the column conventions both exporters share and how to choose between them.
 - **KML exports load as real GIS layers.** Attributes are now emitted as `ExtendedData` against a typed `Schema`, so OGR — and therefore QGIS — exposes them as filterable, styleable fields. Previously every value lived inside the HTML `<description>` balloon and a GIS saw only `Name` and `Description`; verified with `ogrinfo`. Whole-number columns are typed `int`, numeric `float`, the rest `string`.
 - **`export_kml` takes a `flavour`** — `earth` (default, unchanged: HTML popup plus attributes) or `qgis`, which omits the popup. A GIS reads attributes from `ExtendedData` and shows the balloon markup as a large useless `Description` field; dropping it cut a 189-site export from 624 KB to 240 KB.
 - **`npm run check:doc-links`** verifies that every URL cited in the documentation resolves. Provenance is only useful if a reader can follow it, and a citation that 404s cannot be told apart from an invented one.
 
 ### Fixed
+- **Coordinate validation was rejecting legitimate zeros.** `export_kml` skipped any row where latitude or longitude was exactly `0`, silently dropping real records; it now range-checks instead (lat −90..90, lon −180..180), which is what actually catches junk. `export_geojson` behaves identically.
 - **KML attribute values were truncated at 200 characters** with an ellipsis, silently losing the tail of long lists — 4 cells in a 189-site export, including licence-number lists. Values are now written in full, and XML metacharacters are escaped in `ExtendedData`.
 - **The Wayback citation for the vocabulary spreadsheet 404'd.** It was transcribed into `docs/spectrum-provenance.md` without its `?la=en` query string. The capture itself is real — re-verified as HTTP 200, 170,453 bytes, SHA-256 `adf935d5…`, byte-identical to the committed file — but the link as published could not be followed. Replaced with the archive CDX query that finds the capture plus the raw `id_` download, so the source can be located without trusting a transcribed URL.
 
