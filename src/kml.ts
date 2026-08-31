@@ -55,7 +55,7 @@ ${attrIdx.map(i => `      <SimpleField type="${inferType(rows, i)}" name="${fiel
             const lat = Number(row[latIdx]);
             const lng = Number(row[lngIdx]);
             if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-                geometryKml = `<Point><coordinates>${lng},${lat},0</coordinates></Point>`;
+                geometryKml = `<Point><coordinates>${lng},${lat}</coordinates></Point>`;
             }
         }
 
@@ -155,7 +155,7 @@ function wktToKml(wkt: string): string {
         if (match && match[1]) {
             const parts = match[1].trim().split(/\s+/);
             if (parts.length >= 2) {
-                return `<Point><coordinates>${parts[0]},${parts[1]},0</coordinates></Point>`;
+                return `<Point><coordinates>${parts[0]},${parts[1]}</coordinates></Point>`;
             }
         }
     }
@@ -165,7 +165,7 @@ function wktToKml(wkt: string): string {
         if (match && match[1]) {
             const pairs = match[1].split(',').map(p => {
                 const parts = p.trim().split(/\s+/);
-                return parts.length >= 2 ? `${parts[0]},${parts[1]},0` : null;
+                return parts.length >= 2 ? `${parts[0]},${parts[1]}` : null;
             }).filter(Boolean);
             return `<LineString><coordinates>${pairs.join(' ')}</coordinates></LineString>`;
         }
@@ -176,7 +176,7 @@ function wktToKml(wkt: string): string {
         if (match && match[1]) {
             const pairs = match[1].split(',').map(p => {
                 const parts = p.trim().split(/\s+/);
-                return parts.length >= 2 ? `${parts[0]},${parts[1]},0` : null;
+                return parts.length >= 2 ? `${parts[0]},${parts[1]}` : null;
             }).filter(Boolean);
             return `<Polygon><outerBoundaryIs><LinearRing><coordinates>${pairs.join(' ')}</coordinates></LinearRing></outerBoundaryIs></Polygon>`;
         }

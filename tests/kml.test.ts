@@ -5,7 +5,7 @@ describe('KML Generation', () => {
         const columns = ['NAME', 'LATITUDE', 'LONGITUDE'];
         const rows = [['Site A', -29, 134]];
         const kml = generateKml(columns, rows);
-        expect(kml).toContain('<coordinates>134,-29,0</coordinates>');
+        expect(kml).toContain('<coordinates>134,-29</coordinates>');
         expect(kml).toContain('<![CDATA[Site A]]>');
     });
 
@@ -13,14 +13,14 @@ describe('KML Generation', () => {
         const columns = ['NAME', 'GEOMETRY'];
         const rows = [['Line A', 'LINESTRING(120 -35, 125 -25)']];
         const kml = generateKml(columns, rows);
-        expect(kml).toContain('<LineString><coordinates>120,-35,0 125,-25,0</coordinates></LineString>');
+        expect(kml).toContain('<LineString><coordinates>120,-35 125,-25</coordinates></LineString>');
     });
 
     it('should handle polygons', () => {
         const columns = ['NAME', 'GEOMETRY'];
         const rows = [['Poly A', 'POLYGON((140 -35, 155 -35, 155 -25, 140 -25, 140 -35))']];
         const kml = generateKml(columns, rows);
-        expect(kml).toContain('<Polygon><outerBoundaryIs><LinearRing><coordinates>140,-35,0 155,-35,0 155,-25,0 140,-25,0 140,-35,0</coordinates></LinearRing></outerBoundaryIs></Polygon>');
+        expect(kml).toContain('<Polygon><outerBoundaryIs><LinearRing><coordinates>140,-35 155,-35 155,-25 140,-25 140,-35</coordinates></LinearRing></outerBoundaryIs></Polygon>');
     });
 
     it('should generate descriptions with HTML tables', () => {
@@ -107,7 +107,15 @@ describe('KML flavours', () => {
         expect(kml).toContain('<SimpleField type="int" name="CHANNELS">');
         // The placemark still has a name and geometry.
         expect(kml).toContain('<![CDATA[Site A]]>');
-        expect(kml).toContain('<coordinates>134,-29,0</coordinates>');
+        expect(kml).toContain('<coordinates>134,-29</coordinates>');
+    });
+
+    it('emits 2D coordinates, not a meaningless zero elevation', () => {
+        // ",0" made every feature POINT Z in OGR; QGIS then carries the phantom Z
+        // through joins, exports and geometry algorithms.
+        const kml = generateKml(['NAME', 'LATITUDE', 'LONGITUDE'], [['A', -29, 134]]);
+        expect(kml).toContain('<coordinates>134,-29</coordinates>');
+        expect(kml).not.toContain(',0</coordinates>');
     });
 
     it("'qgis' output is materially smaller", () => {
