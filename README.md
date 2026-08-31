@@ -99,6 +99,8 @@ Environment variables:
 | `PORT` | HTTP server port for the Streamable HTTP transport. Default `3000`. |
 | `LOG_LEVEL` | One of `error` / `warn` / `info` (default) / `debug`. Lower levels are emitted; everything else is suppressed. |
 | `DEBUG_NETWORK` | Legacy alias for `LOG_LEVEL=debug` (kept for backwards compatibility). Promotes per-request `[NETWORK]` logging when set. |
+| `OSIRIS_URL` | Base origin of an OSIRIS instance for `push_to_osiris`, e.g. `http://host:3001`. Unset disables the tool. |
+| `OSIRIS_INGEST_KEY` | Shared secret for the OSIRIS Polybolos ingest endpoint. Must equal `SDK_INGEST_KEY` on that instance. |
 
 The server's `/health` endpoint returns JSON with sync provenance (`dataAsOf`, `lastSyncAt`, `remoteAsOf`, `behindByHours`, `isSyncing`). Pass `?deep=1` to additionally probe the DB read-only — returns `500` with `status: degraded` if the DB is unreachable.
 

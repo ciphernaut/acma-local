@@ -30,6 +30,7 @@ import { generateKml } from './kml.js';
 import { generateGeoJson } from './geojson.js';
 import { generateQml } from './qml.js';
 import { generatePolybolos, type PolybolosOptions } from './polybolos.js';
+import { pushToOsiris } from './osiris.js';
 import type { ExportStats } from './export_stats.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
@@ -366,6 +367,29 @@ Projects a cached query result into Polybolos entities for the OSIRIS ingest API
 - query_label: short description of what this set represents, shown to the map operator
 `,
     },
+    push_to_osiris: {
+        summary: 'Push a cached result to an OSIRIS common operating picture as Polybolos entities. [geospatial]',
+        tags: ['geospatial', 'export'],
+        fullDescription: `
+### [Push to OSIRIS]
+Projects a cached result and pushes it to an OSIRIS instance's Polybolos ingest
+endpoint, so the rows appear on its map.
+
+## Usage
+- Requires OSIRIS_URL and OSIRIS_INGEST_KEY in the server environment. The key
+  must equal the SDK_INGEST_KEY configured on the OSIRIS side.
+- Entity ids are natural keys, so pushing the same area twice updates the
+  existing entities rather than duplicating them.
+- OSIRIS has no delete endpoint and its stream serves at most 500 entities, so
+  the projection refuses a set larger than that. Narrow the query instead.
+- Returns how many entities OSIRIS accepted and rejected.
+
+## Input
+- result_id: from a previous query response
+- granularity: 'site' (default) or 'emitter'
+- query_label: short description of what this set represents, shown to the map operator
+`,
+    },
     describe_schema: {
         summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
         tags: ['meta', 'sql'],
@@ -590,6 +614,31 @@ setInterval(() => {
         if (now > entry.expires) resultCache.delete(id);
     }
 }, 300_000).unref();
+
+type ToolResponse = { content: Array<{ type: 'text'; text: string }>; isError?: true };
+
+/**
+ * Shared entry point for every exporter handler (export_kml, export_geojson,
+ * export_qml, export_polybolos, push_to_osiris): validates result_id is
+ * present, looks it up in the cache, and returns either the cached entry or
+ * the standard error response — so the four/five handlers don't each hand-roll
+ * the same two checks and the same wording.
+ */
+function resolveResultEntry(id: string | undefined): { entry: CachedResult } | { errorResponse: ToolResponse } {
+    if (!id) {
+        return { errorResponse: { content: [{ type: 'text', text: 'Missing required parameter: result_id' }], isError: true } };
+    }
+    const entry = resultCache.get(id);
+    if (!entry) {
+        return {
+            errorResponse: {
+                content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
+                isError: true,
+            },
+        };
+    }
+    return { entry };
+}
 
 /**
  * Detects whether a result set contains geospatial data (lat/lng or geometry columns).
@@ -841,6 +890,19 @@ const TOOL_CATALOG = [
     {
         name: 'export_polybolos',
         description: TOOL_DOCS.export_polybolos!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
+                query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
+            },
+            required: ['result_id'],
+        },
+    },
+    {
+        name: 'push_to_osiris',
+        description: TOOL_DOCS.push_to_osiris!.summary,
         inputSchema: {
             type: 'object',
             properties: {
@@ -1199,20 +1261,10 @@ function createServer(): Server {
         }
 
         if (name === 'export_kml') {
-            const id = args?.result_id as string;
-            if (!id) {
-                return {
-                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
-                    isError: true,
-                };
-            }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
+            const id = args?.result_id as string | undefined;
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
             const flavour = args?.flavour === 'qgis' ? 'qgis' : 'earth';
             if (flavour === 'qgis') {
                 log.warn("[KML] flavour='qgis' is deprecated and no longer advertised; " +
@@ -1232,19 +1284,9 @@ function createServer(): Server {
 
         if (name === 'export_geojson') {
             const id = args?.result_id as string | undefined;
-            if (!id) {
-                return {
-                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
-                    isError: true,
-                };
-            }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
             const stats: ExportStats = { skipped: 0 };
             const doc = generateGeoJson(entry.columns, entry.rows, stats);
             const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
@@ -1259,19 +1301,9 @@ function createServer(): Server {
 
         if (name === 'export_qml') {
             const id = args?.result_id as string | undefined;
-            if (!id) {
-                return {
-                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
-                    isError: true,
-                };
-            }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
             const opts: { labelField?: string; fields?: string[] } = {};
             if (typeof args?.label_field === 'string') opts.labelField = args.label_field;
             if (Array.isArray(args?.fields)) opts.fields = (args.fields as unknown[]).map(String);
@@ -1289,16 +1321,9 @@ function createServer(): Server {
 
         if (name === 'export_polybolos') {
             const id = args?.result_id as string | undefined;
-            if (!id) {
-                return { content: [{ type: 'text', text: 'Missing required parameter: result_id' }], isError: true };
-            }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
             const opts: PolybolosOptions = {};
             if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
             if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
@@ -1313,6 +1338,32 @@ function createServer(): Server {
                     content.push({ type: 'text', text: `Note: ${stats.skipped} row(s) could not be projected and were omitted.` });
                 }
                 return { content };
+            } catch (e) {
+                return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
+            }
+        }
+
+        if (name === 'push_to_osiris') {
+            const id = args?.result_id as string | undefined;
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
+            const opts: PolybolosOptions = {};
+            if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
+            if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
+            const asOf = readAsOf();
+            if (asOf) opts.asOf = asOf;
+
+            const stats: ExportStats = { skipped: 0 };
+            try {
+                const doc = generatePolybolos(entry.columns, entry.rows, opts, stats);
+                const result = await pushToOsiris(doc);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({ ...result, skipped: stats.skipped }, null, 2),
+                    }],
+                };
             } catch (e) {
                 return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
             }

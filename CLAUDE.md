@@ -121,5 +121,7 @@ npm run scan:secrets:selftest    # prove the scanner still works
 | `ACMA_DB_PATH` | Absolute path to the SQLite DB. Defaults to `./data/acma.db`. |
 | `LOG_LEVEL` | `error` / `warn` / `info` (default) / `debug`. Routed via `src/logger.ts`. |
 | `DEBUG_NETWORK` | Legacy alias — when set, promotes `LOG_LEVEL` to `debug`. Kept working for backwards compatibility. |
+| `OSIRIS_URL` | Base origin of an OSIRIS instance for `push_to_osiris`, e.g. `http://host:3001`. Unset disables the tool. |
+| `OSIRIS_INGEST_KEY` | Shared secret for the OSIRIS Polybolos ingest endpoint. Must equal `SDK_INGEST_KEY` on that instance. |
 
 For network-exposure hardening (bearer auth, TLS, rate limiting, container packaging), see `docs/AUTH-REWORK.md`.
