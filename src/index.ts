@@ -29,6 +29,7 @@ import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery 
 import { generateKml } from './kml.js';
 import { generateGeoJson } from './geojson.js';
 import { generateQml } from './qml.js';
+import { generatePolybolos, type PolybolosOptions } from './polybolos.js';
 import type { ExportStats } from './export_stats.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
@@ -336,6 +337,35 @@ Written against the QGIS 3.28 schema. It is XML-validated and every field it
 references is checked against the result's columns, but nothing here verifies how
 it RENDERS — there is no QGIS in the test environment.`,
     },
+    export_polybolos: {
+        summary: 'Project a cached result into Polybolos entities for an OSIRIS common operating picture. [geospatial]',
+        tags: ['geospatial', 'export'],
+        fullDescription: `
+### [Polybolos Export]
+Projects a cached query result into Polybolos entities for the OSIRIS ingest API.
+
+## Usage
+- Run a query first; pass its result_id here.
+- granularity 'site' (default) emits one entity per site with devices rolled up.
+  Use it for "who is transmitting near here" — it keeps pin counts low.
+- granularity 'emitter' emits one entity per device, carrying exact frequency.
+  Use it when frequency is the axis of interest.
+- The result must carry LATITUDE and LONGITUDE columns. Site level also needs
+  SITE_ID; emitter level needs SDD_ID.
+- Output is the ingest payload as JSON, WITHOUT the API key. Use push_to_osiris
+  to send it, or save it and post it yourself.
+- Properties pass through whatever the source query selected. A code column
+  such as licence status or service type is projected as its raw ACMA code
+  (e.g. status: "1"), which the map operator sees as a filter label. JOIN
+  licence_status and licence_service in the originating query so these
+  properties carry human-readable names instead of raw codes.
+
+## Input
+- result_id: from a previous query response
+- granularity: 'site' or 'emitter'
+- query_label: short description of what this set represents, shown to the map operator
+`,
+    },
     describe_schema: {
         summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
         tags: ['meta', 'sql'],
@@ -577,6 +607,21 @@ function openDb() {
     return new Database(dbPath, { readonly: true });
 }
 
+/** meta.as_of — how fresh the mirror is. Null when the table is absent or empty. */
+function readAsOf(): string | null {
+    try {
+        const db = openDb();
+        try {
+            const row = db.prepare("SELECT value FROM meta WHERE key = 'as_of'").get() as { value?: string } | undefined;
+            return row?.value ?? null;
+        } finally {
+            db.close();
+        }
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Single source of truth for the tool catalog: served verbatim by tools/list
  * and used to build the startup banner, so the two cannot drift apart.
@@ -794,6 +839,19 @@ const TOOL_CATALOG = [
         },
     },
     {
+        name: 'export_polybolos',
+        description: TOOL_DOCS.export_polybolos!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
+                query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
+            },
+            required: ['result_id'],
+        },
+    },
+    {
         name: 'describe_tool',
         description: TOOL_DOCS.describe_tool!.summary,
         inputSchema: {
@@ -910,6 +968,7 @@ function createServer(): Server {
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
                         { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
+                        { tool: 'export_polybolos', args: { result_id: resultId }, why: 'OSIRIS map layer: push this set to the common operating picture' },
                     ];
                 }
 
@@ -966,6 +1025,7 @@ function createServer(): Server {
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
                         { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
+                        { tool: 'export_polybolos', args: { result_id: resultId }, why: 'OSIRIS map layer: push this set to the common operating picture' },
                     ];
                 }
 
@@ -1125,6 +1185,7 @@ function createServer(): Server {
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
                         { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
+                        { tool: 'export_polybolos', args: { result_id: resultId }, why: 'OSIRIS map layer: push this set to the common operating picture' },
                     ];
                 }
 
@@ -1224,6 +1285,37 @@ function createServer(): Server {
                 });
             }
             return { content };
+        }
+
+        if (name === 'export_polybolos') {
+            const id = args?.result_id as string | undefined;
+            if (!id) {
+                return { content: [{ type: 'text', text: 'Missing required parameter: result_id' }], isError: true };
+            }
+            const entry = resultCache.get(id);
+            if (!entry) {
+                return {
+                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
+                    isError: true,
+                };
+            }
+            const opts: PolybolosOptions = {};
+            if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
+            if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
+            const asOf = readAsOf();
+            if (asOf) opts.asOf = asOf;
+
+            const stats: ExportStats = { skipped: 0 };
+            try {
+                const doc = generatePolybolos(entry.columns, entry.rows, opts, stats);
+                const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
+                if (stats.skipped > 0) {
+                    content.push({ type: 'text', text: `Note: ${stats.skipped} row(s) could not be projected and were omitted.` });
+                }
+                return { content };
+            } catch (e) {
+                return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
+            }
         }
 
         if (name === 'get_frequency_allocation') {
