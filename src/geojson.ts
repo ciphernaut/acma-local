@@ -8,6 +8,8 @@
  * one to hand to QGIS; KML is the one to hand to Google Earth.
  */
 
+import type { ExportStats } from './export_stats.js';
+
 type Position = [number, number];
 
 interface Geometry {
@@ -15,7 +17,7 @@ interface Geometry {
     coordinates: Position | Position[] | Position[][];
 }
 
-export function generateGeoJson(columns: string[], rows: unknown[][]): string {
+export function generateGeoJson(columns: string[], rows: unknown[][], stats?: ExportStats): string {
     const lCols = columns.map(c => c.toLowerCase());
     const latIdx = lCols.indexOf('latitude');
     const lngIdx = lCols.indexOf('longitude');
@@ -45,7 +47,10 @@ export function generateGeoJson(columns: string[], rows: unknown[][]): string {
             const pos = toPosition(row[lngIdx], row[latIdx]);
             if (pos) geometry = { type: 'Point', coordinates: pos };
         }
-        if (!geometry) continue;   // no usable geometry: skip, never emit null geometry
+        if (!geometry) {
+            if (stats) stats.skipped++;
+            continue;   // no usable geometry: skip, never emit null geometry
+        }
 
         const properties: Record<string, unknown> = {};
         for (const i of propIdx) {

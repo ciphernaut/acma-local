@@ -29,6 +29,7 @@ import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery 
 import { generateKml } from './kml.js';
 import { generateGeoJson } from './geojson.js';
 import { generateQml } from './qml.js';
+import type { ExportStats } from './export_stats.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
 import { searchDevicesByEmission } from './emissions_search.js';
@@ -1156,10 +1157,16 @@ function createServer(): Server {
                 log.warn("[KML] flavour='qgis' is deprecated and no longer advertised; " +
                          'use export_geojson for QGIS and web maps');
             }
-            const kml = generateKml(entry.columns, entry.rows, flavour);
-            return {
-                content: [{ type: 'text', text: kml }]
-            };
+            const stats: ExportStats = { skipped: 0 };
+            const kml = generateKml(entry.columns, entry.rows, flavour, stats);
+            const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: kml }];
+            if (stats.skipped > 0) {
+                content.push({
+                    type: 'text',
+                    text: `Note: ${stats.skipped} row(s) had no usable coordinates and were omitted from the export.`,
+                });
+            }
+            return { content };
         }
 
         if (name === 'export_geojson') {
@@ -1177,9 +1184,16 @@ function createServer(): Server {
                     isError: true,
                 };
             }
-            return {
-                content: [{ type: 'text', text: generateGeoJson(entry.columns, entry.rows) }]
-            };
+            const stats: ExportStats = { skipped: 0 };
+            const doc = generateGeoJson(entry.columns, entry.rows, stats);
+            const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
+            if (stats.skipped > 0) {
+                content.push({
+                    type: 'text',
+                    text: `Note: ${stats.skipped} row(s) had no usable coordinates and were omitted from the export.`,
+                });
+            }
+            return { content };
         }
 
         if (name === 'export_qml') {
@@ -1200,9 +1214,16 @@ function createServer(): Server {
             const opts: { labelField?: string; fields?: string[] } = {};
             if (typeof args?.label_field === 'string') opts.labelField = args.label_field;
             if (Array.isArray(args?.fields)) opts.fields = (args.fields as unknown[]).map(String);
-            return {
-                content: [{ type: 'text', text: generateQml(entry.columns, entry.rows, opts) }]
-            };
+            const stats: ExportStats = { skipped: 0 };
+            const doc = generateQml(entry.columns, entry.rows, opts, stats);
+            const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
+            if (stats.skipped > 0) {
+                content.push({
+                    type: 'text',
+                    text: `Note: ${stats.skipped} row(s) had no usable coordinates and were omitted from the export.`,
+                });
+            }
+            return { content };
         }
 
         if (name === 'get_frequency_allocation') {

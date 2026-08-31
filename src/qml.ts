@@ -18,6 +18,8 @@
  * does not have. QGIS schema drift across versions is a real residual risk.
  */
 
+import type { ExportStats } from './export_stats.js';
+
 export interface QmlOptions {
     /** Column to label features with. Defaults to NAME, else the first string column. */
     labelField?: string;
@@ -28,10 +30,16 @@ export interface QmlOptions {
 /** Written against the QGIS 3.28 schema; 3.x reads it, later majors may drift. */
 const QGIS_VERSION = '3.28.0';
 
+/**
+ * `stats` is accepted for interface parity with generateGeoJson/generateKml, but
+ * unused: a .qml is a style document keyed on columns, not a per-row geometry
+ * projection, so there is no row here that can be "dropped".
+ */
 export function generateQml(
     columns: string[],
     rows: unknown[][],
     options: QmlOptions = {},
+    stats?: ExportStats,
 ): string {
     const lCols = columns.map(c => c.toLowerCase());
     const geometryCols = new Set(
