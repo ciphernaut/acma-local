@@ -387,3 +387,48 @@ describe('emission information type', () => {
         expect(p.entities[0].properties.emission_info).toBe('telephony');
     });
 });
+
+describe('per-emission booleans', () => {
+    const C = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'EMISSION'];
+
+    it('emits one boolean per information type present at a site', () => {
+        // Same reasoning as svc_: a site hosting voice and data devices collapses
+        // to emission_info 'mixed', which the operator cannot filter on at all.
+        const p = parse(C, [
+            [7, 'A', -27, 153, 150000000, '16K0F3E'],   // telephony
+            [7, 'A', -27, 153, 450000000, '16K0F1D'],   // data
+        ]);
+        const props = p.entities[0].properties;
+        expect(props.emission_info).toBe('mixed');       // scalar stays honest
+        expect(props.emi_telephony).toBe(true);          // and is now filterable
+        expect(props.emi_data).toBe(true);
+    });
+
+    it('omits information types not present', () => {
+        const p = parse(C, [[7, 'A', -27, 153, 150000000, '16K0F3E']]);
+        const keys = Object.keys(p.entities[0].properties).filter(k => k.startsWith('emi_'));
+        expect(keys).toEqual(['emi_telephony']);
+    });
+
+    it('keeps them real booleans', () => {
+        const p = parse(C, [[7, 'A', -27, 153, 150000000, '16K0F3E']]);
+        expect(typeof p.entities[0].properties.emi_telephony).toBe('boolean');
+    });
+
+    it('emits none when no EMISSION column was selected', () => {
+        const cols = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY'];
+        const p = parse(cols, [[1, 'A', -27, 153, 150000000]]);
+        expect(Object.keys(p.entities[0].properties).filter(k => k.startsWith('emi_'))).toEqual([]);
+    });
+
+    it('emits them at emitter granularity too', () => {
+        const cols = ['SDD_ID', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'EMISSION'];
+        const p = parse(cols, [[901, -27, 153, 150000000, '16K0F1D']], { granularity: 'emitter' });
+        expect(p.entities[0].properties.emi_data).toBe(true);
+    });
+
+    it('ignores an unparseable designator rather than inventing a flag', () => {
+        const p = parse(C, [[7, 'A', -27, 153, 150000000, 'rubbish']]);
+        expect(Object.keys(p.entities[0].properties).filter(k => k.startsWith('emi_'))).toEqual([]);
+    });
+});

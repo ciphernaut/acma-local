@@ -378,8 +378,9 @@ property the operator cannot filter on. Select these where you want the axis:
 - s.LATITUDE, s.LONGITUDE  required always
 - s.NAME             entity label on the map
 - d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
-- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse)
-                     and emission_info (what it carries: telephony, data, television)
+- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse),
+                     emission_info (what it carries: telephony, data, television),
+                     plus one emi_ boolean per information type present
 - ls.SV_NAME         service, plus one svc_ boolean per service present
 - l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
 Join the lookup tables (licence_service, licence_status) so these carry
@@ -420,8 +421,9 @@ property the operator cannot filter on. Select these where you want the axis:
 - s.LATITUDE, s.LONGITUDE  required always
 - s.NAME             entity label on the map
 - d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
-- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse)
-                     and emission_info (what it carries: telephony, data, television)
+- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse),
+                     emission_info (what it carries: telephony, data, television),
+                     plus one emi_ boolean per information type present
 - ls.SV_NAME         service, plus one svc_ boolean per service present
 - l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
 Join the lookup tables (licence_service, licence_status) so these carry
