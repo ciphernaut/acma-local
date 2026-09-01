@@ -87,6 +87,34 @@ function bandFlags(freqHz: number | null): Record<string, boolean> {
 }
 
 /** Coarse modulation group from an emission designator, e.g. '16K0F3E' -> 'angle'. */
+/**
+ * What the emission carries, from the designator's third character, e.g.
+ * '16K0F3E' -> 'telephony'. Slugified from the ITU descriptions in CODE_TABLES.
+ *
+ * Independent of the modulation group: '16K0F3E' (voice) and '16K0F1D' (data)
+ * are both angle-modulated, so an operator asking "is this voice or data" is
+ * asking a different question from "is this FM or AM". Both are cheap to derive,
+ * so both are emitted rather than making one stand in for the other.
+ */
+const INFO_SLUG: Record<string, string> = {
+    A: 'telegraphy_aural',
+    B: 'telegraphy_automatic',
+    C: 'facsimile',
+    D: 'data',
+    E: 'telephony',
+    F: 'television',
+    N: 'none',
+    W: 'combination',
+    X: 'other',
+};
+
+function emissionInfo(raw: unknown): string | null {
+    if (typeof raw !== 'string' || raw.trim() === '') return null;
+    const code = decodeEmissionDesignator(raw).info_type?.code;
+    if (!code) return null;
+    return INFO_SLUG[code] ?? code.toLowerCase();
+}
+
 function emissionClass(raw: unknown): string | null {
     if (typeof raw !== 'string' || raw.trim() === '') return null;
     const decoded = decodeEmissionDesignator(raw);
@@ -195,6 +223,7 @@ function projectSites(a: SiteArgs): Entity[] {
             licence_type: pick(a.typeI),
             status: pick(a.statI),
             emission_class: a.emisI >= 0 ? agree(group.map(r => emissionClass(r[a.emisI]))) : null,
+            emission_info: a.emisI >= 0 ? agree(group.map(r => emissionInfo(r[a.emisI]))) : null,
             ...bands,
         };
 
@@ -247,6 +276,7 @@ function projectEmitters(a: EmitterArgs): Entity[] {
             sdd_id: scalar(sddId),
             frequency_hz: freqHz,
             emission_class: a.emisI >= 0 ? emissionClass(row[a.emisI]) : null,
+            emission_info: a.emisI >= 0 ? emissionInfo(row[a.emisI]) : null,
             service: a.svcI >= 0 ? scalar(row[a.svcI]) : null,
             licence_type: a.typeI >= 0 ? scalar(row[a.typeI]) : null,
             status: a.statI >= 0 ? scalar(row[a.statI]) : null,

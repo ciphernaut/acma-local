@@ -341,3 +341,49 @@ describe('producer source', () => {
         expect(() => generatePolybolos(C, row, { source: 'has spaces' })).toThrow(/source/i);
     });
 });
+
+describe('emission information type', () => {
+    const C = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'EMISSION'];
+
+    it('emits what is being sent alongside how it is modulated', () => {
+        // 16K0F3E: F = frequency modulation (group 'angle'), E = telephony.
+        // The two axes are independent and an operator wants both.
+        const p = parse(C, [[1, 'A', -27, 153, 150000000, '16K0F3E']]);
+        expect(p.entities[0].properties.emission_class).toBe('angle');
+        expect(p.entities[0].properties.emission_info).toBe('telephony');
+    });
+
+    it('distinguishes data from voice on the same modulation', () => {
+        const voice = parse(C, [[1, 'A', -27, 153, 150000000, '16K0F3E']]);
+        const data = parse(C, [[2, 'B', -27, 153, 150000000, '16K0F1D']]);
+        expect(voice.entities[0].properties.emission_class)
+            .toBe(data.entities[0].properties.emission_class);   // both 'angle'
+        expect(voice.entities[0].properties.emission_info).toBe('telephony');
+        expect(data.entities[0].properties.emission_info).toBe('data');
+    });
+
+    it('rolls up to mixed when a site disagrees', () => {
+        const p = parse(C, [
+            [7, 'A', -27, 153, 150000000, '16K0F3E'],
+            [7, 'A', -27, 153, 150000000, '16K0F1D'],
+        ]);
+        expect(p.entities[0].properties.emission_info).toBe('mixed');
+    });
+
+    it('is null when no EMISSION column was selected', () => {
+        const cols = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY'];
+        const p = parse(cols, [[1, 'A', -27, 153, 150000000]]);
+        expect(p.entities[0].properties.emission_info).toBeNull();
+    });
+
+    it('tolerates an unparseable designator', () => {
+        const p = parse(C, [[1, 'A', -27, 153, 150000000, 'rubbish']]);
+        expect(p.entities[0].properties.emission_info).toBeNull();
+    });
+
+    it('emits it at emitter granularity too', () => {
+        const cols = ['SDD_ID', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'EMISSION'];
+        const p = parse(cols, [[901, -27, 153, 150000000, '16K0F3E']], { granularity: 'emitter' });
+        expect(p.entities[0].properties.emission_info).toBe('telephony');
+    });
+});

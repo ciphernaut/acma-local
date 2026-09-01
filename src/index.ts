@@ -369,6 +369,23 @@ Projects a cached query result into Polybolos entities for the OSIRIS ingest API
 - result_id: from a previous query response
 - granularity: 'site' or 'emitter'
 - query_label: short description of what this set represents, shown to the map operator
+
+## Columns that unlock properties
+The projection reads what your query selected, so a column you omit becomes a
+property the operator cannot filter on. Select these where you want the axis:
+- s.SITE_ID          required at site granularity (the natural key)
+- d.SDD_ID           required at emitter granularity; also enables device_count
+- s.LATITUDE, s.LONGITUDE  required always
+- s.NAME             entity label on the map
+- d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
+- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse)
+                     and emission_info (what it carries: telephony, data, television)
+- ls.SV_NAME         service, plus one svc_ boolean per service present
+- l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
+Join the lookup tables (licence_service, licence_status) so these carry
+human-readable names rather than raw codes.
+Any other column you select rides along as a flat property.
+
 `,
     },
     push_to_osiris: {
@@ -394,6 +411,23 @@ endpoint, so the rows appear on its map.
 - result_id: from a previous query response
 - granularity: 'site' (default) or 'emitter'
 - query_label: short description of what this set represents, shown to the map operator
+
+## Columns that unlock properties
+The projection reads what your query selected, so a column you omit becomes a
+property the operator cannot filter on. Select these where you want the axis:
+- s.SITE_ID          required at site granularity (the natural key)
+- d.SDD_ID           required at emitter granularity; also enables device_count
+- s.LATITUDE, s.LONGITUDE  required always
+- s.NAME             entity label on the map
+- d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
+- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse)
+                     and emission_info (what it carries: telephony, data, television)
+- ls.SV_NAME         service, plus one svc_ boolean per service present
+- l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
+Join the lookup tables (licence_service, licence_status) so these carry
+human-readable names rather than raw codes.
+Any other column you select rides along as a flat property.
+
 `,
     },
     describe_schema: {
