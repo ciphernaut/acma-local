@@ -938,6 +938,7 @@ const TOOL_CATALOG = [
                 sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
+                source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },
             },
             // one of result_id / sql is required; enforced in the handler so the
                 // error can name both options rather than a schema violation.
@@ -954,6 +955,7 @@ const TOOL_CATALOG = [
                 sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
+                source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },
             },
             // one of result_id / sql is required; enforced in the handler so the
                 // error can name both options rather than a schema violation.
@@ -1372,6 +1374,7 @@ function createServer(): Server {
             const opts: PolybolosOptions = {};
             if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
             if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
+            if (typeof args?.source === 'string') opts.source = args.source;
             const asOf = readAsOf();
             if (asOf) opts.asOf = asOf;
 
@@ -1397,6 +1400,7 @@ function createServer(): Server {
             const opts: PolybolosOptions = {};
             if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
             if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
+            if (typeof args?.source === 'string') opts.source = args.source;
             const asOf = readAsOf();
             if (asOf) opts.asOf = asOf;
 

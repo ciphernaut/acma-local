@@ -27,6 +27,13 @@ export type Granularity = 'site' | 'emitter';
 
 export interface PolybolosOptions {
     granularity?: Granularity;
+    /**
+     * Producer tag. OSIRIS namespaces stored ids as ext-{source}-{id} and scopes
+     * its DELETE endpoint by source, so two producers sharing a name means one
+     * one's cleanup destroys the other's estate. Override when pushing a test set
+     * alongside a live one.
+     */
+    source?: string;
     /** What produced this set, shown to the operator. Without it a map of pins cannot explain itself. */
     queryLabel?: string;
     /** Freshness of the mirror at projection time (meta.as_of). */
@@ -277,6 +284,12 @@ export function generatePolybolos(
     stats?: ExportStats,
 ): string {
     const granularity = opts.granularity ?? 'site';
+    const source = opts.source ?? SOURCE;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(source)) {
+        throw new Error(
+            `Invalid source "${source}". It becomes part of the stored id (ext-{source}-{id}), so it must be alphanumeric with dots, dashes or underscores.`,
+        );
+    }
     const lower = columns.map(c => c.toLowerCase());
 
     const latI  = idx(lower, 'latitude');
@@ -324,5 +337,5 @@ export function generatePolybolos(
     };
     for (const e of entities) Object.assign(e.properties, provenance);
 
-    return JSON.stringify({ source: SOURCE, entities }, null, 2) + '\n';
+    return JSON.stringify({ source, entities }, null, 2) + '\n';
 }

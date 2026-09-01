@@ -321,3 +321,23 @@ describe('per-service booleans and frequency bounds', () => {
         expect(p.entities[0].properties.svc_maritime_coast).toBe(true);
     });
 });
+
+describe('producer source', () => {
+    const C = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'SV_NAME'];
+    const row = [[1, 'A', -27, 153, 150000000, 'Land Mobile']];
+
+    it('defaults to acma-rrl', () => {
+        expect(parse(C, row).source).toBe('acma-rrl');
+    });
+
+    it('accepts an override, so a second producer can be retracted independently', () => {
+        // OSIRIS namespaces stored ids as ext-{source}-{id} and its DELETE endpoint
+        // is scoped by source, so sharing one source name makes one producer's
+        // cleanup destroy the other's estate.
+        expect(parse(C, row, { source: 'acma-rrl-test' }).source).toBe('acma-rrl-test');
+    });
+
+    it('rejects a source that would not round-trip through the id namespace', () => {
+        expect(() => generatePolybolos(C, row, { source: 'has spaces' })).toThrow(/source/i);
+    });
+});
