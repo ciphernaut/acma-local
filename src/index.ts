@@ -49,6 +49,26 @@ interface ToolDoc {
     fullDescription: string;  // returned by describe_tool
 }
 
+/** Shared by both projection tools: one copy, so a new column is documented once. */
+const PROJECTION_COLUMNS_DOC = `
+## Columns that unlock properties
+The projection reads what your query selected, so a column you omit becomes a
+property the operator cannot filter on. Select these where you want the axis:
+- s.SITE_ID          required at site granularity (the natural key)
+- d.SDD_ID           required at emitter granularity; also enables device_count
+- s.LATITUDE, s.LONGITUDE  required always
+- s.NAME             entity label on the map
+- d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
+- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse),
+                     emission_info (what it carries: telephony, data, television),
+                     plus one emi_ boolean per information type present
+- ls.SV_NAME         service, plus one svc_ boolean per service present
+- l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
+Join the lookup tables (licence_service, licence_status) so these carry
+human-readable names rather than raw codes.
+Any other column you select rides along as a flat property.
+`;
+
 export const TOOL_DOCS: Record<string, ToolDoc> = {
     search_licences: {
         summary: 'Search ACMA licences by licence number (substring match). [primary]',
@@ -369,24 +389,7 @@ Projects a cached query result into Polybolos entities for the OSIRIS ingest API
 - result_id: from a previous query response
 - granularity: 'site' or 'emitter'
 - query_label: short description of what this set represents, shown to the map operator
-
-## Columns that unlock properties
-The projection reads what your query selected, so a column you omit becomes a
-property the operator cannot filter on. Select these where you want the axis:
-- s.SITE_ID          required at site granularity (the natural key)
-- d.SDD_ID           required at emitter granularity; also enables device_count
-- s.LATITUDE, s.LONGITUDE  required always
-- s.NAME             entity label on the map
-- d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
-- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse),
-                     emission_info (what it carries: telephony, data, television),
-                     plus one emi_ boolean per information type present
-- ls.SV_NAME         service, plus one svc_ boolean per service present
-- l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
-Join the lookup tables (licence_service, licence_status) so these carry
-human-readable names rather than raw codes.
-Any other column you select rides along as a flat property.
-
+${PROJECTION_COLUMNS_DOC}
 `,
     },
     push_to_osiris: {
@@ -412,24 +415,7 @@ endpoint, so the rows appear on its map.
 - result_id: from a previous query response
 - granularity: 'site' (default) or 'emitter'
 - query_label: short description of what this set represents, shown to the map operator
-
-## Columns that unlock properties
-The projection reads what your query selected, so a column you omit becomes a
-property the operator cannot filter on. Select these where you want the axis:
-- s.SITE_ID          required at site granularity (the natural key)
-- d.SDD_ID           required at emitter granularity; also enables device_count
-- s.LATITUDE, s.LONGITUDE  required always
-- s.NAME             entity label on the map
-- d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
-- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse),
-                     emission_info (what it carries: telephony, data, television),
-                     plus one emi_ boolean per information type present
-- ls.SV_NAME         service, plus one svc_ boolean per service present
-- l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
-Join the lookup tables (licence_service, licence_status) so these carry
-human-readable names rather than raw codes.
-Any other column you select rides along as a flat property.
-
+${PROJECTION_COLUMNS_DOC}
 `,
     },
     describe_schema: {
@@ -1118,7 +1104,10 @@ function createServer(): Server {
                     const columns = Object.keys(result.devices[0] as object);
                     if (hasGeospatialData(columns)) {
                         const rows = result.devices.map(r => columns.map(c => (r as any)[c]));
-                        resultId = cacheResult(columns, rows);
+                        // getLicenceDetails caps devices at 50 (src/logic.ts). Hitting the
+                        // cap may mean more exist, so flag it rather than let a partial set
+                        // reach push_to_osiris looking complete.
+                        resultId = cacheResult(columns, rows, result.devices.length >= 50);
                     }
                 }
 
@@ -1140,7 +1129,8 @@ function createServer(): Server {
         if (name === 'search_sites') {
             const db = openDb();
             try {
-                const rows = searchSites(db, args?.query as string, (args?.limit as number) ?? 10) as any[];
+                const searchLimit = (args?.limit as number) ?? 10;
+                const rows = searchSites(db, args?.query as string, searchLimit) as any[];
 
                 // Cache results for potential KML export
                 let resultId: string | undefined;
@@ -1148,7 +1138,8 @@ function createServer(): Server {
                     const columns = Object.keys(rows[0] as object);
                     if (hasGeospatialData(columns)) {
                         const rowArrays = rows.map(r => columns.map(c => (r as any)[c]));
-                        resultId = cacheResult(columns, rowArrays);
+                        // A full page back from a LIMITed search may be a cut result.
+                        resultId = cacheResult(columns, rowArrays, rows.length >= searchLimit);
                     }
                 }
 
@@ -1176,7 +1167,8 @@ function createServer(): Server {
                 const columns = Object.keys(result.site as object);
                 if (hasGeospatialData(columns)) {
                     const rows = [columns.map(c => (result.site as any)[c])];
-                    resultId = cacheResult(columns, rows);
+                    // Exactly one site record by construction — never truncated.
+                    resultId = cacheResult(columns, rows, false);
                 }
 
                 const response: any = { ...result };
@@ -1478,12 +1470,17 @@ function createServer(): Server {
                     };
                 }
                 const result = await pushToOsiris(doc);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: JSON.stringify({ ...result, skipped: stats.skipped }, null, 2),
-                    }],
-                };
+                const content: Array<{ type: 'text'; text: string }> = [{
+                    type: 'text',
+                    text: JSON.stringify({ ...result, skipped: stats.skipped }, null, 2),
+                }];
+                // Warnings are not fatal but must not vanish: a duplicate id means
+                // OSIRIS keeps only the last, so the operator sees fewer pins than
+                // this response reports.
+                if (verdict.warnings.length > 0) {
+                    content.push({ type: 'text', text: formatValidationReport(verdict) });
+                }
+                return { content };
             } catch (e) {
                 return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
             }

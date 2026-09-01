@@ -96,6 +96,23 @@ describe('worker parity', () => {
         expect(capOf(cjs)).toBe(capOf(ts));
     });
 
+    it('both worker implementations use the same cap CONSTANTS', () => {
+        // Comparing the cap expression alone is not enough: it references two
+        // constants, and the .ts writes 50_000 where the .cjs writes 50000. Raising
+        // one and not the other leaves the expression identical while the runtime
+        // file (the .cjs) keeps the old clamp.
+        const numeric = (s: string, name: string) => {
+            const m = s.match(new RegExp(`const ${name} = ([0-9_]+);`));
+            return m ? Number(m[1]!.replace(/_/g, '')) : null;
+        };
+        for (const name of ['DEFAULT_ROW_CAP', 'HARD_ROW_CAP']) {
+            const a = numeric(read('sql_worker.ts'), name);
+            const b = numeric(read('sql_worker.cjs'), name);
+            expect(a).not.toBeNull();
+            expect(b).toBe(a);
+        }
+    });
+
     it('both worker implementations destructure the same workerData fields', () => {
         // Must read the DESTRUCTURE, not the file. Filtering a fixed list by
         // file.includes(name) passes even when a field is missing from the

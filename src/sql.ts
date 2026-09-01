@@ -434,10 +434,12 @@ export function listSampleQueries(filter?: {
  * @param dbPath  Absolute path to the SQLite database file
  * @param sql     A SELECT statement to execute
  * @param limit   Max rows to return (default 100). Capped at 500 unless maxRows raises it.
- * @param maxRows Row ceiling for the projection path only. Absent, the 500 cap
- *                applies. Hard-clamped by the worker: a caller cannot use it to
- *                materialise an unbounded table.
+
  * @param timeoutMs  Wall-clock deadline in milliseconds (default 25000)
+ * @param maxRows Row ceiling for the projection path only, and the LAST
+ *                parameter — passing it in timeoutMs's position silently turns a
+ *                row ceiling into a timeout. Absent, the 500 cap applies.
+ *                Hard-clamped by the worker.
  */
 export function executeSqlWithTimeout(
     dbPath: string,

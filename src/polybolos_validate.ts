@@ -41,6 +41,19 @@ export const ENTITY_CEILING = 500;
 
 type Props = Record<string, unknown>;
 
+/**
+ * Property prefixes whose values must be real JSON booleans.
+ *
+ * Listed once: this rule was added for band_ and svc_, then a third family
+ * (emi_) shipped without extending the check, so integer emi_ flags passed a
+ * gate that integer band_ flags failed. Adding a family means adding it here.
+ */
+export const BOOLEAN_FLAG_PREFIXES = ['band_', 'svc_', 'emi_'] as const;
+
+function isFlagProperty(key: string): boolean {
+    return BOOLEAN_FLAG_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+
 function isScalar(v: unknown): boolean {
     return v === null || ['string', 'number', 'boolean'].includes(typeof v);
 }
@@ -123,7 +136,7 @@ export function validatePolybolosPayload(input: string | unknown): ValidationRep
                     { entityId: id });
             }
             // Track the type each flag-shaped property arrives as, across the whole set.
-            if (k.startsWith('band_') || k.startsWith('svc_')) {
+            if (isFlagProperty(k)) {
                 if (!flagTypes.has(k)) flagTypes.set(k, new Set());
                 flagTypes.get(k)!.add(typeof v);
             }

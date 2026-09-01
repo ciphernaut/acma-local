@@ -1,4 +1,5 @@
-import { generatePolybolos, STREAM_CEILING } from '../src/polybolos.js';
+import { generatePolybolos, STREAM_CEILING, INFO_SLUG } from '../src/polybolos.js';
+import { CODE_TABLES } from '../src/emissions.js';
 import type { ExportStats } from '../src/export_stats.js';
 
 function parse(columns: string[], rows: unknown[][], opts = {}, stats?: ExportStats): any {
@@ -430,5 +431,19 @@ describe('per-emission booleans', () => {
     it('ignores an unparseable designator rather than inventing a flag', () => {
         const p = parse(C, [[7, 'A', -27, 153, 150000000, 'rubbish']]);
         expect(Object.keys(p.entities[0].properties).filter(k => k.startsWith('emi_'))).toEqual([]);
+    });
+});
+
+describe('emission slug map covers the code table', () => {
+    it('has a slug for every info_type code in CODE_TABLES', () => {
+        // CODE_TABLES is the source of truth for emission codes. Without this,
+        // a code added there falls back to a bare letter (emi_z) with nothing failing.
+        const codes = Object.keys(CODE_TABLES.info_type);
+        expect(codes.length).toBeGreaterThan(0);
+        for (const c of codes) expect(INFO_SLUG[c]).toBeDefined();
+    });
+
+    it('has no slug for a code that does not exist', () => {
+        for (const c of Object.keys(INFO_SLUG)) expect(CODE_TABLES.info_type).toHaveProperty(c);
     });
 });

@@ -89,14 +89,21 @@ function bandFlags(freqHz: number | null): Record<string, boolean> {
 /** Coarse modulation group from an emission designator, e.g. '16K0F3E' -> 'angle'. */
 /**
  * What the emission carries, from the designator's third character, e.g.
- * '16K0F3E' -> 'telephony'. Slugified from the ITU descriptions in CODE_TABLES.
+ * '16K0F3E' -> 'telephony'.
+ *
+ * Deliberately an explicit map rather than a slug derived from the ITU
+ * descriptions: derivation turns "Combination of the above" and "Cases not
+ * otherwise covered" into nothing usable, and "Data transmission, telemetry,
+ * telecommand" into data_transmission — worse names for an operator-facing
+ * filter. CODE_TABLES in src/emissions.ts remains the source of truth for the
+ * CODES; tests/polybolos.test.ts asserts this map covers every one of them, so
+ * a code added there fails the suite rather than silently degrading to a letter.
  *
  * Independent of the modulation group: '16K0F3E' (voice) and '16K0F1D' (data)
- * are both angle-modulated, so an operator asking "is this voice or data" is
- * asking a different question from "is this FM or AM". Both are cheap to derive,
- * so both are emitted rather than making one stand in for the other.
+ * are both angle-modulated, so "is this voice or data" is a different question
+ * from "is this FM or AM". Both are cheap, so both are emitted.
  */
-const INFO_SLUG: Record<string, string> = {
+export const INFO_SLUG: Record<string, string> = {
     A: 'telegraphy_aural',
     B: 'telegraphy_automatic',
     C: 'facsimile',
@@ -108,17 +115,28 @@ const INFO_SLUG: Record<string, string> = {
     X: 'other',
 };
 
-function emissionInfo(raw: unknown): string | null {
-    if (typeof raw !== 'string' || raw.trim() === '') return null;
-    const code = decodeEmissionDesignator(raw).info_type?.code;
-    if (!code) return null;
-    return INFO_SLUG[code] ?? code.toLowerCase();
+/**
+ * Both emission axes from ONE decode.
+ *
+ * They were derived separately, so projectSites decoded every designator three
+ * times — once for the class rollup, once for the info rollup, once for the
+ * flags. At the 50000-row ceiling that is 150k decodes inside a single request.
+ */
+function decodeEmission(raw: unknown): { klass: string | null; info: string | null } {
+    if (typeof raw !== 'string' || raw.trim() === '') return { klass: null, info: null };
+    const d = decodeEmissionDesignator(raw);
+    const code = d.info_type?.code;
+    return { klass: d.modulation?.group ?? null, info: code ? (INFO_SLUG[code] ?? code.toLowerCase()) : null };
 }
 
+/** Coarse modulation group, e.g. '16K0F3E' -> 'angle'. */
 function emissionClass(raw: unknown): string | null {
-    if (typeof raw !== 'string' || raw.trim() === '') return null;
-    const decoded = decodeEmissionDesignator(raw);
-    return decoded.modulation?.group ?? null;
+    return decodeEmission(raw).klass;
+}
+
+/** What the emission carries, e.g. '16K0F3E' -> 'telephony'. */
+function emissionInfo(raw: unknown): string | null {
+    return decodeEmission(raw).info;
 }
 
 /**
