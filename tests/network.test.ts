@@ -250,6 +250,20 @@ describe('MCP Network & Sync Integration (Streamable HTTP)', () => {
         expect(tools.tools.some(t => t.name === 'push_to_osiris')).toBe(true);
         expect(tools.tools.length).toBe(22);
 
+        // Both projection tools must offer the sql path, not only result_id:
+        // execute_sql's 500-row cap reaches ~18 sites, so whole-region rollups
+        // are unreachable through result_id alone.
+        for (const name of ['export_polybolos', 'push_to_osiris']) {
+            const tool = tools.tools.find(t => t.name === name);
+            expect(tool).toBeDefined();
+            const props = (tool!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+            expect(Object.keys(props)).toContain('sql');
+            expect(Object.keys(props)).toContain('result_id');
+            // Neither may be schema-required on its own — the handler enforces
+            // "one of", so the error can name both options.
+            expect((tool!.inputSchema as { required?: string[] }).required ?? []).not.toContain('result_id');
+        }
+
         await transport.close();
     }, 15000);
 

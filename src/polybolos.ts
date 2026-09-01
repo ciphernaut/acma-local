@@ -275,9 +275,14 @@ export function generatePolybolos(
         : projectEmitters({ columns, rows, lower, latI, lngI, sddI, freqI, emisI, svcI, typeI, statI, ...(stats !== undefined ? { stats } : {}) });
 
     if (entities.length > STREAM_CEILING) {
+        // The advice must match the granularity actually in use: telling a caller
+        // already at site level to "use granularity site" sends them in a circle.
+        const advice = granularity === 'emitter'
+            ? 'Narrow the query, or use granularity "site" to roll devices up into one entity per site.'
+            : 'Narrow the query — this is already rolled up per site, so there are simply more sites than the ceiling allows.';
         throw new Error(
             `Projection produced ${entities.length} entities, over the OSIRIS stream ceiling of ${STREAM_CEILING}. ` +
-            `Beyond that, OSIRIS drops entities arbitrarily. Narrow the query, or use granularity "site" to roll devices up.`,
+            `Beyond that, OSIRIS drops entities arbitrarily. ${advice}`,
         );
     }
 

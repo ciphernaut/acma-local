@@ -244,3 +244,20 @@ describe('generatePolybolos — emitter level', () => {
         expect(p.entities[0].properties.licence_no).toBe('1234567/1');
     });
 });
+
+describe('ceiling advice matches granularity', () => {
+    const COLS2 = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'SV_NAME'];
+
+    it('does not tell a site-level caller to switch to site level', () => {
+        const rows = Array.from({ length: STREAM_CEILING + 1 }, (_, i) =>
+            [i, `Site ${i}`, -27, 153, 150000000, 'Land Mobile']);
+        expect(() => generatePolybolos(COLS2, rows)).toThrow(/already rolled up per site/);
+    });
+
+    it('does suggest site rollup to an emitter-level caller', () => {
+        const cols = ['SDD_ID', 'LATITUDE', 'LONGITUDE', 'FREQUENCY'];
+        const rows = Array.from({ length: STREAM_CEILING + 1 }, (_, i) => [i, -27, 153, 150000000]);
+        expect(() => generatePolybolos(cols, rows, { granularity: 'emitter' }))
+            .toThrow(/use granularity "site"/);
+    });
+});

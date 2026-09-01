@@ -346,7 +346,10 @@ it RENDERS — there is no QGIS in the test environment.`,
 Projects a cached query result into Polybolos entities for the OSIRIS ingest API.
 
 ## Usage
-- Run a query first; pass its result_id here.
+- Pass EITHER result_id (from a previous query) OR sql (projected here).
+- Use sql for whole-region rollups: execute_sql caps at 500 rows, which reaches
+  about 18 sites at typical device density, whereas the sql path reads up to
+  50000 rows and rolls them into at most 500 entities.
 - granularity 'site' (default) emits one entity per site with devices rolled up.
   Use it for "who is transmitting near here" — it keeps pin counts low.
 - granularity 'emitter' emits one entity per device, carrying exact frequency.
@@ -376,6 +379,8 @@ Projects a cached result and pushes it to an OSIRIS instance's Polybolos ingest
 endpoint, so the rows appear on its map.
 
 ## Usage
+- Pass EITHER result_id OR sql. The sql path reads up to 50000 rows, so a whole
+  region can be rolled up in one call; a partial read is refused rather than pushed.
 - Requires OSIRIS_URL and OSIRIS_INGEST_KEY in the server environment. The key
   must equal the SDK_INGEST_KEY configured on the OSIRIS side.
 - Entity ids are natural keys, so pushing the same area twice updates the
@@ -641,6 +646,42 @@ function resolveResultEntry(id: string | undefined): { entry: CachedResult } | {
 }
 
 /**
+ * Row ceiling for the projection path. Deliberately far above execute_sql's 500:
+ * a site-level rollup must see every device row, and at ~27 device rows per site
+ * a 500-row cap reaches 18 sites. The limit that actually binds is 500 ENTITIES,
+ * enforced inside generatePolybolos.
+ */
+const PROJECTION_ROW_CEILING = 50_000;
+
+/**
+ * Projection input from EITHER a cached result_id or a SQL query run here.
+ * The SQL path exists because rolling device rows up into sites needs far more
+ * rows than a result an agent reads; see docs/osiris-bridge-reference.md.
+ */
+async function resolveProjectionInput(
+    args: Record<string, unknown> | undefined,
+): Promise<{ columns: string[]; rows: unknown[][]; truncated: boolean } | { errorResponse: ToolResponse }> {
+    const id = typeof args?.result_id === 'string' ? args.result_id : undefined;
+    const sql = typeof args?.sql === 'string' ? args.sql : undefined;
+
+    if (id && sql) {
+        return { errorResponse: { content: [{ type: 'text', text: 'Pass either result_id or sql, not both.' }], isError: true } };
+    }
+    if (!id && !sql) {
+        return { errorResponse: { content: [{ type: 'text', text: 'Missing required parameter: pass result_id (from a previous query) or sql (projected here, up to 50000 rows).' }], isError: true } };
+    }
+
+    if (sql) {
+        const r = await executeSqlWithTimeout(dbPath, sql, PROJECTION_ROW_CEILING, 60_000, PROJECTION_ROW_CEILING);
+        return { columns: r.columns, rows: r.rows, truncated: r.truncated };
+    }
+
+    const resolved = resolveResultEntry(id);
+    if ('errorResponse' in resolved) return resolved;
+    return { columns: resolved.entry.columns, rows: resolved.entry.rows, truncated: false };
+}
+
+/**
  * Detects whether a result set contains geospatial data (lat/lng or geometry columns).
  */
 function hasGeospatialData(columns: string[]): boolean {
@@ -894,10 +935,13 @@ const TOOL_CATALOG = [
             type: 'object',
             properties: {
                 result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
             },
-            required: ['result_id'],
+            // one of result_id / sql is required; enforced in the handler so the
+                // error can name both options rather than a schema violation.
+
         },
     },
     {
@@ -907,10 +951,13 @@ const TOOL_CATALOG = [
             type: 'object',
             properties: {
                 result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
             },
-            required: ['result_id'],
+            // one of result_id / sql is required; enforced in the handler so the
+                // error can name both options rather than a schema violation.
+
         },
     },
     {
@@ -1320,10 +1367,8 @@ function createServer(): Server {
         }
 
         if (name === 'export_polybolos') {
-            const id = args?.result_id as string | undefined;
-            const resolved = resolveResultEntry(id);
+            const resolved = await resolveProjectionInput(args);
             if ('errorResponse' in resolved) return resolved.errorResponse;
-            const { entry } = resolved;
             const opts: PolybolosOptions = {};
             if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
             if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
@@ -1332,10 +1377,13 @@ function createServer(): Server {
 
             const stats: ExportStats = { skipped: 0 };
             try {
-                const doc = generatePolybolos(entry.columns, entry.rows, opts, stats);
+                const doc = generatePolybolos(resolved.columns, resolved.rows, opts, stats);
                 const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
                 if (stats.skipped > 0) {
                     content.push({ type: 'text', text: `Note: ${stats.skipped} row(s) could not be projected and were omitted.` });
+                }
+                if (resolved.truncated) {
+                    content.push({ type: 'text', text: `Warning: the query hit the ${PROJECTION_ROW_CEILING}-row projection ceiling and was cut. The entities above are projected from a PARTIAL result — narrow the query before trusting them.` });
                 }
                 return { content };
             } catch (e) {
@@ -1344,10 +1392,8 @@ function createServer(): Server {
         }
 
         if (name === 'push_to_osiris') {
-            const id = args?.result_id as string | undefined;
-            const resolved = resolveResultEntry(id);
+            const resolved = await resolveProjectionInput(args);
             if ('errorResponse' in resolved) return resolved.errorResponse;
-            const { entry } = resolved;
             const opts: PolybolosOptions = {};
             if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
             if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
@@ -1356,7 +1402,15 @@ function createServer(): Server {
 
             const stats: ExportStats = { skipped: 0 };
             try {
-                const doc = generatePolybolos(entry.columns, entry.rows, opts, stats);
+                const doc = generatePolybolos(resolved.columns, resolved.rows, opts, stats);
+                if (resolved.truncated) {
+                    // Pushing a knowingly partial set into a store with no delete is worse
+                    // than refusing: the operator cannot tell it is looking at a fragment.
+                    return {
+                        content: [{ type: 'text', text: `Refusing to push: the query hit the ${PROJECTION_ROW_CEILING}-row projection ceiling, so the result is partial. Narrow the query and push again.` }],
+                        isError: true,
+                    };
+                }
                 const result = await pushToOsiris(doc);
                 return {
                     content: [{
