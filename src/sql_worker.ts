@@ -12,10 +12,12 @@
 import { workerData, parentPort } from 'worker_threads';
 import Database from 'better-sqlite3';
 
-const { dbPath, sql, limit } = workerData as {
+const { dbPath, sql, limit, maxRows } = workerData as {
     dbPath: string;
     sql: string;
     limit: number;
+    /** Row ceiling for the projection path. Absent means the ordinary 500. */
+    maxRows?: number;
 };
 
 // Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker
@@ -61,7 +63,15 @@ function hasStatementSeparator(sql: string): boolean {
     return false;
 }
 
-function runQuery(dbPath: string, sql: string, limit: number) {
+/**
+ * Row ceiling for a result an agent will read. The projection path passes an
+ * explicit, higher maxRows: rolling device rows up into site entities has to see
+ * every device row, and at ~27 rows per site a 500-row cap reaches 18 sites.
+ * The ceiling that matters downstream is 500 ENTITIES, enforced in the projection.
+ */
+const DEFAULT_ROW_CAP = 500;
+
+function runQuery(dbPath: string, sql: string, limit: number, maxRows?: number) {
     const trimmed = sql.trim();
     if (!trimmed) throw new Error('SQL query cannot be empty.');
 
@@ -73,7 +83,7 @@ function runQuery(dbPath: string, sql: string, limit: number) {
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), 500);
+    const cap = Math.min(Math.max(1, limit), maxRows ?? DEFAULT_ROW_CAP);
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,
@@ -111,7 +121,7 @@ function runQuery(dbPath: string, sql: string, limit: number) {
 }
 
 try {
-    const result = runQuery(dbPath, sql, limit);
+    const result = runQuery(dbPath, sql, limit, maxRows);
     parentPort!.postMessage({ ok: true, result });
 } catch (err: any) {
     parentPort!.postMessage({ ok: false, error: err.message });

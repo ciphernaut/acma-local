@@ -1,7 +1,7 @@
 /**
  * sql_worker.cjs — Worker thread entry point (CommonJS, no transpilation needed).
  *
- * Receives { dbPath, sql, limit } via workerData, opens its own read-only
+ * Receives { dbPath, sql, limit, maxRows } via workerData, opens its own read-only
  * DB connection, runs the SELECT query, and posts the result back.
  *
  * Written as plain CJS so it works without tsx/ESM loader registration.
@@ -10,7 +10,7 @@
 const { workerData, parentPort } = require('worker_threads');
 const Database = require('better-sqlite3');
 
-const { dbPath, sql, limit } = workerData;
+const { dbPath, sql, limit, maxRows } = workerData;
 
 // Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker
 // cannot import from there (ESM resolution differs between tsx and dist/), so the
@@ -55,7 +55,15 @@ function hasStatementSeparator(sql) {
     return false;
 }
 
-function runQuery(dbPath, sql, limit) {
+/**
+ * Row ceiling for a result an agent will read. The projection path passes an
+ * explicit, higher maxRows: rolling device rows up into site entities has to see
+ * every device row, and at ~27 rows per site a 500-row cap reaches 18 sites.
+ * The ceiling that matters downstream is 500 ENTITIES, enforced in the projection.
+ */
+const DEFAULT_ROW_CAP = 500;
+
+function runQuery(dbPath, sql, limit, maxRows) {
     const trimmed = sql.trim();
     if (!trimmed) throw new Error('SQL query cannot be empty.');
 
@@ -67,7 +75,7 @@ function runQuery(dbPath, sql, limit) {
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), 500);
+    const cap = Math.min(Math.max(1, limit), maxRows ?? DEFAULT_ROW_CAP);
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,
@@ -105,7 +113,7 @@ function runQuery(dbPath, sql, limit) {
 }
 
 try {
-    const result = runQuery(dbPath, sql, limit);
+    const result = runQuery(dbPath, sql, limit, maxRows);
     parentPort.postMessage({ ok: true, result });
 } catch (err) {
     parentPort.postMessage({ ok: false, error: err.message });

@@ -440,7 +440,8 @@ export function executeSqlWithTimeout(
     dbPath: string,
     sql: string,
     limit: number = 100,
-    timeoutMs: number = 25_000
+    timeoutMs: number = 25_000,
+    maxRows?: number
 ): Promise<SqlResult> {
     return new Promise((resolve, reject) => {
         // Prefer the pre-compiled CJS worker (runs on any Node.js without tsx/ESM).
@@ -452,7 +453,7 @@ export function executeSqlWithTimeout(
                     : workerBase + '.js';
 
         const worker = new Worker(workerScript, {
-            workerData: { dbPath, sql, limit },
+            workerData: { dbPath, sql, limit, ...(maxRows !== undefined ? { maxRows } : {}) },
             // No execArgv propagation needed — .cjs workers run without tsx
         });
 
