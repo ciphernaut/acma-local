@@ -261,3 +261,63 @@ describe('ceiling advice matches granularity', () => {
             .toThrow(/use granularity "site"/);
     });
 });
+
+describe('per-service booleans and frequency bounds', () => {
+    const C = ['SITE_ID', 'SITE_NAME', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'SV_NAME'];
+
+    it('emits one boolean per service present at a site', () => {
+        // A set encoded as an ordered string cannot be a category: "Fixed,Land Mobile"
+        // and "Land Mobile,Fixed" are the same site but two different toggle rows.
+        const p = parse(C, [
+            [7, 'A', -27, 153, 150000000, 'Land Mobile'],
+            [7, 'A', -27, 153, 450000000, 'Fixed'],
+        ]);
+        const props = p.entities[0].properties;
+        expect(props.svc_land_mobile).toBe(true);
+        expect(props.svc_fixed).toBe(true);
+    });
+
+    it('omits services not present rather than emitting false for all 28', () => {
+        const p = parse(C, [[7, 'A', -27, 153, 150000000, 'Land Mobile']]);
+        const keys = Object.keys(p.entities[0].properties).filter(k => k.startsWith('svc_'));
+        expect(keys).toEqual(['svc_land_mobile']);
+    });
+
+    it('slugifies service names with punctuation and spaces', () => {
+        const p = parse(C, [
+            [7, 'A', -27, 153, 150000000, 'PTS 900 MHz'],
+            [7, 'A', -27, 153, 150000000, 'Trade/Transfer'],
+        ]);
+        const props = p.entities[0].properties;
+        expect(props.svc_pts_900_mhz).toBe(true);
+        expect(props.svc_trade_transfer).toBe(true);
+    });
+
+    it('keeps the svc_ flags real booleans, never 1/0', () => {
+        const p = parse(C, [[7, 'A', -27, 153, 150000000, 'Land Mobile']]);
+        expect(typeof p.entities[0].properties.svc_land_mobile).toBe('boolean');
+    });
+
+    it('bounds the frequency range across the site group', () => {
+        const p = parse(C, [
+            [7, 'A', -27, 153, 150000000, 'Land Mobile'],
+            [7, 'A', -27, 153, 450000000, 'Land Mobile'],
+            [7, 'A', -27, 153, 900000000, 'Land Mobile'],
+        ]);
+        const props = p.entities[0].properties;
+        expect(props.freq_min_hz).toBe(150000000);
+        expect(props.freq_max_hz).toBe(900000000);
+    });
+
+    it('leaves frequency bounds null when no row carries a frequency', () => {
+        const p = parse(C, [[7, 'A', -27, 153, null, 'Land Mobile']]);
+        expect(p.entities[0].properties.freq_min_hz).toBeNull();
+        expect(p.entities[0].properties.freq_max_hz).toBeNull();
+    });
+
+    it('emits svc_ flags at emitter granularity too, so filters are uniform', () => {
+        const cols = ['SDD_ID', 'LATITUDE', 'LONGITUDE', 'FREQUENCY', 'SV_NAME'];
+        const p = parse(cols, [[901, -27, 153, 150000000, 'Maritime Coast']], { granularity: 'emitter' });
+        expect(p.entities[0].properties.svc_maritime_coast).toBe(true);
+    });
+});

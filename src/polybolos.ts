@@ -86,6 +86,29 @@ function emissionClass(raw: unknown): string | null {
     return decoded.modulation?.group ?? null;
 }
 
+/**
+ * A service name as a property key: 'PTS 900 MHz' -> 'svc_pts_900_mhz'.
+ *
+ * One boolean per service, rather than a joined list. A set encoded as an
+ * ordered string cannot act as a category — 'Fixed,Land Mobile' and
+ * 'Land Mobile,Fixed' describe the same site but count as two, and the
+ * category count grows combinatorially with the number of services present.
+ */
+function serviceKey(name: string): string {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return `svc_${slug}`;
+}
+
+/** svc_* flags for the services present in a group. Absent means false. */
+function serviceFlags(values: unknown[]): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    for (const v of values) {
+        if (typeof v !== 'string' || v.trim() === '') continue;
+        out[serviceKey(v.trim())] = true;
+    }
+    return out;
+}
+
 function scalar(v: unknown): string | number | boolean | null {
     if (v === null || v === undefined) return null;
     if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') return v;
@@ -136,6 +159,11 @@ function projectSites(a: SiteArgs): Entity[] {
 
         const pick = (i: number) => i >= 0 ? agree(group.map(r => scalar(r[i]))) : null;
 
+        const freqs = a.freqI >= 0
+            ? group.map(r => toNumberOrNull(r[a.freqI])).filter((n): n is number => n !== null)
+            : [];
+        const svcFlags = a.svcI >= 0 ? serviceFlags(group.map(r => r[a.svcI])) : {};
+
         // device_count is only substantiated when the group actually carries SDD_ID
         // rows to count distinct devices from; row_count is always a true statement
         // regardless of what a join fanned the result set out to.
@@ -154,6 +182,9 @@ function projectSites(a: SiteArgs): Entity[] {
             row_count: group.length,
             ...(deviceCount !== undefined ? { device_count: deviceCount } : {}),
             service: pick(a.svcI),
+            freq_min_hz: freqs.length ? Math.min(...freqs) : null,
+            freq_max_hz: freqs.length ? Math.max(...freqs) : null,
+            ...svcFlags,
             licence_type: pick(a.typeI),
             status: pick(a.statI),
             emission_class: a.emisI >= 0 ? agree(group.map(r => emissionClass(r[a.emisI]))) : null,
@@ -213,6 +244,7 @@ function projectEmitters(a: EmitterArgs): Entity[] {
             licence_type: a.typeI >= 0 ? scalar(row[a.typeI]) : null,
             status: a.statI >= 0 ? scalar(row[a.statI]) : null,
             ...bandFlags(freqHz),
+            ...(a.svcI >= 0 ? serviceFlags([row[a.svcI]]) : {}),
         };
 
         // Anything else the query selected rides along as a flat scalar.
