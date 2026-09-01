@@ -96,11 +96,21 @@ describe('worker parity', () => {
         expect(capOf(cjs)).toBe(capOf(ts));
     });
 
-    it('both worker implementations accept the same workerData fields', () => {
-        const fields = (s: string) => {
-            const m = s.match(/workerData\s*(?:as[\s\S]*?)?[;}]/);
-            return m ? ['dbPath', 'sql', 'limit', 'maxRows'].filter(f => s.includes(f)) : [];
+    it('both worker implementations destructure the same workerData fields', () => {
+        // Must read the DESTRUCTURE, not the file. Filtering a fixed list by
+        // file.includes(name) passes even when a field is missing from the
+        // destructure, because both files name all of them in their header
+        // comments — a guard that cannot fail is not a guard.
+        const destructured = (s: string) => {
+            const m = s.match(/const \{([^}]*)\} = workerData/);
+            if (!m) return null;
+            return m[1]!.split(',').map(f => f.trim()).filter(Boolean).sort();
         };
-        expect(fields(read('sql_worker.cjs'))).toEqual(fields(read('sql_worker.ts')));
+        const ts = destructured(read('sql_worker.ts'));
+        const cjs = destructured(read('sql_worker.cjs'));
+        expect(ts).not.toBeNull();
+        expect(cjs).not.toBeNull();
+        expect(ts).toContain('maxRows');
+        expect(cjs).toEqual(ts);
     });
 });

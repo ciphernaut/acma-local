@@ -63,6 +63,12 @@ function hasStatementSeparator(sql) {
  */
 const DEFAULT_ROW_CAP = 500;
 
+/**
+ * Absolute ceiling on maxRows. Without it the projection ceiling is whatever a
+ * caller passes, and one bad value materialises the whole table in this worker.
+ */
+const HARD_ROW_CAP = 50000;
+
 function runQuery(dbPath, sql, limit, maxRows) {
     const trimmed = sql.trim();
     if (!trimmed) throw new Error('SQL query cannot be empty.');
@@ -75,7 +81,7 @@ function runQuery(dbPath, sql, limit, maxRows) {
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), maxRows ?? DEFAULT_ROW_CAP);
+    const cap = Math.min(Math.max(1, limit), Math.min(maxRows ?? DEFAULT_ROW_CAP, HARD_ROW_CAP));
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,

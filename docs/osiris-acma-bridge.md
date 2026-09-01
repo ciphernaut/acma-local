@@ -54,7 +54,9 @@ and clears it when the toggle goes off. Same word, unrelated data path. Feeding
 that bucket is not the integration point; a new layer module is.
 
 **The store is memory-only and cannot forget.** No persistence (a restart clears
-it), no TTL, no eviction, and no delete endpoint. The stream serves
+it) and, at the time of writing, no TTL, no eviction and no delete endpoint.
+OSIRIS v1.1.0 has since added a source-scoped DELETE and a 24 h TTL, so a push
+is retractable provided the producer used its own `source`. The stream serves
 `Array.from(store.values()).slice(0, 500)`, so once the store passes 500 entities
 the overflow reaches no client, and which entities are lost is arbitrary.
 

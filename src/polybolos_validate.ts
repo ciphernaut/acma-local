@@ -15,7 +15,8 @@
  *     false for all 477 entities while 83 of them held channels above 3 GHz.
  *
  * Run it before pushing. A payload that fails here will render wrongly or
- * filter to nothing, and OSIRIS has no delete endpoint to undo it with.
+ * filter to nothing. OSIRIS gained a source-scoped DELETE and a TTL in v1.1.0,
+ * so a bad push is now retractable — but only if the producer used its own source.
  */
 
 export interface ValidationIssue {
@@ -65,6 +66,16 @@ export function validatePolybolosPayload(input: string | unknown): ValidationRep
         }
     }
 
+    // A payload that parses to a primitive (a truncated file, a bare number) must
+    // come back as a report, not a TypeError from the `in` operator below.
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+        return {
+            ok: false, entityCount: 0,
+            errors: [{ severity: 'error', rule: 'payload/shape', message: `Payload must be a JSON object with source and entities, received ${Array.isArray(payload) ? 'an array' : payload === null ? 'null' : typeof payload}.` }],
+            warnings: [],
+        };
+    }
+
     const p = payload as { source?: unknown; apiKey?: unknown; entities?: unknown };
     if (typeof p?.source !== 'string' || p.source === '') {
         err('payload/source', 'Payload needs a non-empty string `source` — OSIRIS namespaces stored ids as ext-{source}-{id}.');
@@ -80,7 +91,7 @@ export function validatePolybolosPayload(input: string | unknown): ValidationRep
     const entities = p.entities as Array<{ id?: unknown; position?: unknown; properties?: unknown }>;
     if (entities.length > ENTITY_CEILING) {
         err('payload/ceiling',
-            `${entities.length} entities exceeds the ${ENTITY_CEILING}-entity stream ceiling. Beyond it OSIRIS drops entities arbitrarily and there is no delete endpoint to recover.`);
+            `${entities.length} entities exceeds the ${ENTITY_CEILING}-entity stream ceiling. Beyond it OSIRIS serves only the first 500 and drops the rest arbitrarily.`);
     }
 
     const seenIds = new Map<string, number>();

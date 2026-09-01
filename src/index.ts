@@ -31,6 +31,7 @@ import { generateGeoJson } from './geojson.js';
 import { generateQml } from './qml.js';
 import { generatePolybolos, type PolybolosOptions } from './polybolos.js';
 import { pushToOsiris } from './osiris.js';
+import { validatePolybolosPayload, formatValidationReport } from './polybolos_validate.js';
 import type { ExportStats } from './export_stats.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
@@ -602,13 +603,19 @@ interface CachedResult {
     columns: string[];
     rows: unknown[][];
     expires: number;
+    /**
+     * Whether the cached read was cut short by the row cap. Carried so a
+     * consumer can refuse to act on a partial set — without it, a truncated
+     * 500-row read is indistinguishable from a complete one.
+     */
+    truncated: boolean;
 }
 
 const resultCache = new Map<string, CachedResult>();
 
-function cacheResult(columns: string[], rows: unknown[][]): string {
+function cacheResult(columns: string[], rows: unknown[][], truncated = false): string {
     const id = randomUUID();
-    resultCache.set(id, { columns, rows, expires: Date.now() + 30 * 60 * 1000 });
+    resultCache.set(id, { columns, rows, truncated, expires: Date.now() + 30 * 60 * 1000 });
     return id;
 }
 
@@ -672,13 +679,20 @@ async function resolveProjectionInput(
     }
 
     if (sql) {
-        const r = await executeSqlWithTimeout(dbPath, sql, PROJECTION_ROW_CEILING, 60_000, PROJECTION_ROW_CEILING);
-        return { columns: r.columns, rows: r.rows, truncated: r.truncated };
+        // A rejected query (bad SQL, non-SELECT, timeout) must come back as a tool
+        // error like every other path in this file, not escape as a JSON-RPC fault.
+        try {
+            const r = await executeSqlWithTimeout(dbPath, sql, PROJECTION_ROW_CEILING, 60_000, PROJECTION_ROW_CEILING);
+            return { columns: r.columns, rows: r.rows, truncated: r.truncated };
+        } catch (e) {
+            return { errorResponse: { content: [{ type: 'text', text: `SQL Error: ${e instanceof Error ? e.message : String(e)}` }], isError: true } };
+        }
     }
 
     const resolved = resolveResultEntry(id);
     if ('errorResponse' in resolved) return resolved;
-    return { columns: resolved.entry.columns, rows: resolved.entry.rows, truncated: false };
+    // A cached result can itself have been truncated by execute_sql's 500-row cap.
+    return { columns: resolved.entry.columns, rows: resolved.entry.rows, truncated: resolved.entry.truncated };
 }
 
 /**
@@ -1286,7 +1300,7 @@ function createServer(): Server {
                 // Cache results for potential KML export if geospatial data detected
                 let resultId: string | undefined;
                 if (result.rowCount > 0 && hasGeospatialData(result.columns)) {
-                    resultId = cacheResult(result.columns, result.rows);
+                    resultId = cacheResult(result.columns, result.rows, result.truncated);
                 }
 
                 const response: any = { ...result };
@@ -1404,14 +1418,26 @@ function createServer(): Server {
             const asOf = readAsOf();
             if (asOf) opts.asOf = asOf;
 
+            // Checked BEFORE projecting: otherwise an over-ceiling projection throws
+            // first and the caller is told to narrow for the ENTITY limit while never
+            // learning the read itself was cut — they could narrow and still push a
+            // partial set.
+            if (resolved.truncated) {
+                return {
+                    content: [{ type: 'text', text: `Refusing to push: the read was cut short by a row cap, so this result is partial. Narrow the query — pushing a fragment gives the operator no way to tell it is one.` }],
+                    isError: true,
+                };
+            }
+
             const stats: ExportStats = { skipped: 0 };
             try {
                 const doc = generatePolybolos(resolved.columns, resolved.rows, opts, stats);
-                if (resolved.truncated) {
-                    // Pushing a knowingly partial set into a store with no delete is worse
-                    // than refusing: the operator cannot tell it is looking at a fragment.
+                // F6: the contract checker is the whole point of having one — run it
+                // on the way out, not only in Jest.
+                const verdict = validatePolybolosPayload(doc);
+                if (!verdict.ok) {
                     return {
-                        content: [{ type: 'text', text: `Refusing to push: the query hit the ${PROJECTION_ROW_CEILING}-row projection ceiling, so the result is partial. Narrow the query and push again.` }],
+                        content: [{ type: 'text', text: `Refusing to push: the projected payload fails the Polybolos contract.\n\n${formatValidationReport(verdict)}` }],
                         isError: true,
                     };
                 }

@@ -29,8 +29,8 @@ export interface PolybolosOptions {
     granularity?: Granularity;
     /**
      * Producer tag. OSIRIS namespaces stored ids as ext-{source}-{id} and scopes
-     * its DELETE endpoint by source, so two producers sharing a name means one
-     * one's cleanup destroys the other's estate. Override when pushing a test set
+     * its DELETE endpoint by source, so two producers sharing a name means
+     * one producer's cleanup destroys the other's estate. Override when pushing a test set
      * alongside a live one.
      */
     source?: string;

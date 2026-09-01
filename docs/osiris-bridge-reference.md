@@ -135,7 +135,7 @@ Four destinations. Nothing below is a blocker for what already shipped.
 | Item | Where | Note |
 |---|---|---|
 | Falsy-zero latitude bug | `src/app/api/sdk/ingest/route.ts` | `!entity.position?.lat` rejects a latitude of exactly `0`. Harmless for Australia (−10 to −44), wrong everywhere. This repo's own `toPosition()` documents the same lesson — good evidence to cite. |
-| No delete / TTL endpoint | ingest route + store | The store cannot forget. This is what forces natural-key ids and makes M12 unfixable from our side. |
+| ~~No delete / TTL endpoint~~ **DONE** | ingest route + store | Shipped in OSIRIS v1.1.0: source-scoped `DELETE /api/sdk/ingest`, 24 h TTL, and `total`/`sent`/`truncated` accounting on the stream. Natural-key ids still matter, but a bad push is now retractable. |
 | `slice(0, 500)` drops arbitrarily | `src/app/api/sdk/stream/route.ts` | A hard ceiling on how much picture can be held at once. Site rollup buys headroom; it does not remove the ceiling. |
 
 ### D. Config and operations — no code anywhere
