@@ -74,11 +74,13 @@ describe('projection row ceiling', () => {
         expect(r.truncated).toBe(true);
     });
 
-    it('does not let the projection ceiling raise the ordinary default', async () => {
-        // No maxRows argument: the 500 cap stands, whatever limit is asked for.
+    it('respects the default row ceiling when no maxRows is specified', async () => {
+        // No maxRows argument: the DEFAULT_ROW_CAP (5000) cap stands, matching the
+        // execute_sql tool's explicit limit ceiling. The 500-entity projection guarantee
+        // is still enforced in generatePolybolos, not at this row level.
         const r = await executeSqlWithTimeout(dbPath, JOIN, 5000, 25_000);
-        expect(r.rows).toHaveLength(500);
-        expect(r.truncated).toBe(true);
+        expect(r.rows).toHaveLength(1200); // all rows fit within the 5000 cap
+        expect(r.truncated).toBe(false);
     });
 });
 

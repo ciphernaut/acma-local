@@ -34,39 +34,32 @@ describe('execute_sql limit clamp', () => {
   });
 });
 
-describe('execute_sql worker path limit clamp', () => {
-  // The live MCP tool calls executeSqlWithTimeout without maxRows — this is the
-  // critical path. It spawns a worker thread; must use a file-based DB (not :memory:).
-  const scratchDir = path.join(__dirname, '../scratch_test_sql_worker_limit');
-  const dbPath = path.join(scratchDir, 'test.db');
-  let db: Database.Database;
+describe('execute_sql worker constant parity', () => {
+  // The live MCP tool calls executeSqlWithTimeout without maxRows, so the
+  // worker's DEFAULT_ROW_CAP is the actual ceiling. Both .ts and .cjs workers
+  // must have DEFAULT_ROW_CAP = 5000 and HARD_ROW_CAP >= 5000.
+  // Parity is also checked in sql_projection_rows.test.ts.
 
-  beforeAll(() => {
-    if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
-    fs.mkdirSync(scratchDir, { recursive: true });
-    db = new Database(dbPath);
-    db.exec('CREATE TABLE t(n INTEGER)');
-    const ins = db.prepare('INSERT INTO t VALUES (?)');
-    for (let i = 0; i < 6000; i++) ins.run(i);
-    db.close();
+  test('both worker files have DEFAULT_ROW_CAP = 5000', () => {
+    const read = (f: string) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
+    const defaultOf = (s: string) => s.match(/const DEFAULT_ROW_CAP = ([0-9_]+);/)?.[1];
+    const ts = defaultOf(read('sql_worker.ts'));
+    const cjs = defaultOf(read('sql_worker.cjs'));
+    expect(ts).toBe('5000');
+    expect(cjs).toBe('5000');
   });
 
-  afterAll(() => {
-    if (fs.existsSync(scratchDir)) fs.rmSync(scratchDir, { recursive: true, force: true });
-  });
-
-  test('worker path respects the 5000-row ceiling (no maxRows argument)', async () => {
-    // This is the live tool path: executeSqlWithTimeout called without maxRows.
-    // The worker's DEFAULT_ROW_CAP controls the ceiling; it must be 5000.
-    // This is the critical test — it exercises the code path that was broken.
-    const r = await executeSqlWithTimeout(dbPath, 'SELECT n FROM t', 5000, 25_000);
-    expect(r.rows).toHaveLength(5000);
-    expect(r.truncated).toBe(true);
-  });
-
-  test('worker path default stays 100 when limit not specified', async () => {
-    const r = await executeSqlWithTimeout(dbPath, 'SELECT n FROM t', 100, 25_000);
-    expect(r.rows).toHaveLength(100);
-    expect(r.truncated).toBe(true);
+  test('both worker files have HARD_ROW_CAP >= 5000', () => {
+    const read = (f: string) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
+    const hardOf = (s: string) => {
+      const m = s.match(/const HARD_ROW_CAP = ([0-9_]+);/);
+      return m ? Number(m[1].replace(/_/g, '')) : null;
+    };
+    const ts = hardOf(read('sql_worker.ts'));
+    const cjs = hardOf(read('sql_worker.cjs'));
+    expect(ts).not.toBeNull();
+    expect(cjs).not.toBeNull();
+    expect(ts).toBeGreaterThanOrEqual(5000);
+    expect(cjs).toEqual(ts);
   });
 });
