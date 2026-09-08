@@ -10,6 +10,7 @@
 const { workerData, parentPort } = require('worker_threads');
 const Database = require('better-sqlite3');
 
+// maxRows: row ceiling override for the projection path. Absent means the default 5000.
 const { dbPath, sql, limit, maxRows } = workerData;
 
 // Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker

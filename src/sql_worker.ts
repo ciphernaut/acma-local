@@ -16,7 +16,7 @@ const { dbPath, sql, limit, maxRows } = workerData as {
     dbPath: string;
     sql: string;
     limit: number;
-    /** Row ceiling for the projection path. Absent means the ordinary 500. */
+    /** Row ceiling override for the projection path. Absent means the default 5000. */
     maxRows?: number;
 };
 

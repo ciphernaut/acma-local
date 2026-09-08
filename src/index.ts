@@ -628,7 +628,7 @@ interface CachedResult {
     /**
      * Whether the cached read was cut short by the row cap. Carried so a
      * consumer can refuse to act on a partial set — without it, a truncated
-     * 500-row read is indistinguishable from a complete one.
+     * result is indistinguishable from a complete one.
      */
     truncated: boolean;
 }
@@ -713,7 +713,7 @@ async function resolveProjectionInput(
 
     const resolved = resolveResultEntry(id);
     if ('errorResponse' in resolved) return resolved;
-    // A cached result can itself have been truncated by execute_sql's 500-row cap.
+    // A cached result can itself have been truncated by execute_sql's row limit ceiling.
     return { columns: resolved.entry.columns, rows: resolved.entry.rows, truncated: resolved.entry.truncated };
 }
 
