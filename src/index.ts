@@ -227,7 +227,7 @@ Curated SQL examples grouped by category. Bare call returns a compact category i
 - data-dict: sqlite_master introspection`,
     },
     execute_sql: {
-        summary: '[SQL] Run a read-only SELECT/WITH query against the RRL database (max 500 rows).',
+        summary: '[SQL] Run a read-only SELECT/WITH query against the RRL database (max 5000 rows).',
         tags: ['sql'],
         fullDescription: `
 ### [SQL Query Executor]
@@ -238,14 +238,14 @@ Run a read-only SELECT or WITH (CTE) query directly against the ACMA RRL SQLite 
 - Use list_sample_queries first if unsure what to query
 - Only SELECT/WITH statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
 - Do NOT terminate the query with a semicolon. A separator outside quotes is rejected as a second statement, and a trailing ';' is a syntax error once the query is wrapped for the row limit. A ';' INSIDE a string literal or a comment is fine.
-- Results capped at 'limit' rows (default 100, max 500)
+- Results capped at 'limit' rows (default 100, max 5000)
 - If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Row limit — always check 'truncated'
-The cap is a hard 500 with no pagination. When 'truncated' is true, rows were dropped and
+The cap is 5000 rows with no pagination. When 'truncated' is true, rows were dropped and
 anything built from that result (export_kml especially) is INCOMPLETE. Aggregates are
 computed inside SQLite and are never truncated, so run a SELECT COUNT(*) first to size a
-result set before exporting it. Beyond 500 rows, aggregate or narrow the filter.
+result set before exporting it. Beyond 5000 rows, aggregate or narrow the filter.
 
 ## Output
 { columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string, _hints?: ... }`,
@@ -368,8 +368,8 @@ Projects a cached query result into Polybolos entities for the OSIRIS ingest API
 
 ## Usage
 - Pass EITHER result_id (from a previous query) OR sql (projected here).
-- Use sql for whole-region rollups: execute_sql caps at 500 rows, which reaches
-  about 18 sites at typical device density, whereas the sql path reads up to
+- Use sql for whole-region rollups: execute_sql caps at 5000 rows, which reaches
+  about 185 sites at typical device density, whereas the sql path reads up to
   50000 rows and rolls them into at most 500 entities.
 - granularity 'site' (default) emits one entity per site with devices rolled up.
   Use it for "who is transmitting near here" — it keeps pin counts low.
@@ -675,9 +675,9 @@ function resolveResultEntry(id: string | undefined): { entry: CachedResult } | {
 }
 
 /**
- * Row ceiling for the projection path. Deliberately far above execute_sql's 500:
+ * Row ceiling for the projection path. Deliberately far above execute_sql's 5000:
  * a site-level rollup must see every device row, and at ~27 device rows per site
- * a 500-row cap reaches 18 sites. The limit that actually binds is 500 ENTITIES,
+ * a 5000-row cap reaches 185 sites. The limit that actually binds is 500 ENTITIES,
  * enforced inside generatePolybolos.
  */
 const PROJECTION_ROW_CEILING = 50_000;
@@ -920,7 +920,7 @@ const TOOL_CATALOG = [
                 },
                 limit: {
                     type: 'number',
-                    description: 'Max rows to return (default 100, max 500)',
+                    description: 'Max rows to return (default 100, max 5000)',
                 },
             },
             required: ['sql'],
@@ -971,7 +971,7 @@ const TOOL_CATALOG = [
             type: 'object',
             properties: {
                 result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 5000-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
                 source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },
@@ -988,7 +988,7 @@ const TOOL_CATALOG = [
             type: 'object',
             properties: {
                 result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 5000-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
                 source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },

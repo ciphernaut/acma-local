@@ -7,6 +7,11 @@ import * as fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** Ceiling for an explicitly requested execute_sql limit. Raised from 500 for
+ *  keyset-paging clients (OSIRIS SQL layers) — a 168k-row walk at 500/page is
+ *  ~340 round trips; at 5000 it is 34. The 25s worker deadline is unchanged
+ *  and remains the real resource bound. Default limit stays 100. */
+export const EXECUTE_SQL_MAX_LIMIT = 5000;
 
 export interface SqlResult {
     columns: string[];
@@ -18,7 +23,7 @@ export interface SqlResult {
 /**
  * Execute a read-only SELECT query against the ACMA RRL database.
  * Enforces SELECT-only: any other statement type throws an error.
- * Applies a row limit (default 100, max 500).
+ * Applies a row limit (default 100, max 5000).
  */
 /**
  * True when `sql` contains a statement separator OUTSIDE of string literals,
@@ -97,7 +102,7 @@ export function executeSql(
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), 500);
+    const cap = Math.min(Math.max(1, limit), EXECUTE_SQL_MAX_LIMIT);
 
     // Wrap the query to enforce the row limit without altering user's SQL
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
@@ -443,12 +448,12 @@ export function listSampleQueries(filter?: {
  *
  * @param dbPath  Absolute path to the SQLite database file
  * @param sql     A SELECT statement to execute
- * @param limit   Max rows to return (default 100). Capped at 500 unless maxRows raises it.
+ * @param limit   Max rows to return (default 100). Capped at EXECUTE_SQL_MAX_LIMIT unless maxRows raises it.
 
  * @param timeoutMs  Wall-clock deadline in milliseconds (default 25000)
  * @param maxRows Row ceiling for the projection path only, and the LAST
  *                parameter — passing it in timeoutMs's position silently turns a
- *                row ceiling into a timeout. Absent, the 500 cap applies.
+ *                row ceiling into a timeout. Absent, EXECUTE_SQL_MAX_LIMIT applies.
  *                Hard-clamped by the worker.
  */
 export function executeSqlWithTimeout(
