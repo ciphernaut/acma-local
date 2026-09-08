@@ -39,20 +39,14 @@ describe('views', () => {
     const db = open();
     const cols = (v: string) =>
       db.prepare(`SELECT name FROM pragma_table_info('${v}')`).all().map((r: any) => r.name);
-    expect(cols('v_emitters')).toEqual(
-      expect.arrayContaining(['id', 'lat', 'lon', 'label', 'frequency_hz', 'call_sign',
-        'modulation', 'signal_nature', 'info_type', 'station_class', 'service',
-        'licensee', 'trading_name', 'licence_status', 'state', 'device_type',
-        'transmitter_power_w', 'bandwidth_hz']),
-    );
-    expect(cols('v_sites')).toEqual(
-      expect.arrayContaining(['id', 'lat', 'lon', 'label', 'state', 'postcode',
-        'device_count', 'freq_min_hz', 'freq_max_hz']),
-    );
-    expect(cols('v_links')).toEqual(
-      expect.arrayContaining(['id', 'lat_a', 'lon_a', 'lat_b', 'lon_b',
-        'label_a', 'label_b', 'frequency_hz', 'service', 'licensee']),
-    );
+    expect(cols('v_emitters')).toEqual(['id','lat','lon','label','site_id','state','postcode',
+      'frequency_hz','bandwidth_hz','transmitter_power_w','eirp_raw','device_type','call_sign',
+      'emission','modulation','signal_nature','info_type','station_class','licence_no',
+      'licence_status','service','licensee','trading_name']);
+    expect(cols('v_sites')).toEqual(['id','lat','lon','label','state','postcode',
+      'device_count','freq_min_hz','freq_max_hz']);
+    expect(cols('v_links')).toEqual(['id','lat_a','lon_a','label_a','lat_b','lon_b','label_b',
+      'site_id_a','site_id_b','frequency_hz','service','licensee']);
     db.close();
   });
 
