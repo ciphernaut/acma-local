@@ -227,7 +227,7 @@ Curated SQL examples grouped by category. Bare call returns a compact category i
 - data-dict: sqlite_master introspection`,
     },
     execute_sql: {
-        summary: '[SQL] Run a read-only SELECT/WITH query against the RRL database (max 500 rows).',
+        summary: '[SQL] Run a read-only SELECT/WITH query against the RRL database (max 5000 rows).',
         tags: ['sql'],
         fullDescription: `
 ### [SQL Query Executor]
@@ -238,14 +238,14 @@ Run a read-only SELECT or WITH (CTE) query directly against the ACMA RRL SQLite 
 - Use list_sample_queries first if unsure what to query
 - Only SELECT/WITH statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
 - Do NOT terminate the query with a semicolon. A separator outside quotes is rejected as a second statement, and a trailing ';' is a syntax error once the query is wrapped for the row limit. A ';' INSIDE a string literal or a comment is fine.
-- Results capped at 'limit' rows (default 100, max 500)
+- Results capped at 'limit' rows (default 100, max 5000)
 - If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Row limit — always check 'truncated'
-The cap is a hard 500 with no pagination. When 'truncated' is true, rows were dropped and
+The cap is 5000 rows with no pagination. When 'truncated' is true, rows were dropped and
 anything built from that result (export_kml especially) is INCOMPLETE. Aggregates are
 computed inside SQLite and are never truncated, so run a SELECT COUNT(*) first to size a
-result set before exporting it. Beyond 500 rows, aggregate or narrow the filter.
+result set before exporting it. Beyond 5000 rows, aggregate or narrow the filter.
 
 ## Output
 { columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string, _hints?: ... }`,
@@ -368,13 +368,16 @@ Projects a cached query result into Polybolos entities for the OSIRIS ingest API
 
 ## Usage
 - Pass EITHER result_id (from a previous query) OR sql (projected here).
-- Use sql for whole-region rollups: execute_sql caps at 500 rows, which reaches
-  about 18 sites at typical device density, whereas the sql path reads up to
+- Use sql for whole-region rollups: execute_sql caps at 5000 rows, which reaches
+  about 185 sites at typical device density, whereas the sql path reads up to
   50000 rows and rolls them into at most 500 entities.
 - granularity 'site' (default) emits one entity per site with devices rolled up.
   Use it for "who is transmitting near here" — it keeps pin counts low.
 - granularity 'emitter' emits one entity per device, carrying exact frequency.
-  Use it when frequency is the axis of interest.
+  Use it when frequency is the axis of interest. One entity per row means the
+  500-entity OSIRIS ceiling is also a 500-row ceiling at this granularity — with
+  execute_sql's limit now reaching 5000, an emitter-granularity result_id above
+  500 rows will be refused; narrow the query or switch to 'site' rollup instead.
 - The result must carry LATITUDE and LONGITUDE columns. Site level also needs
   SITE_ID; emitter level needs SDD_ID.
 - Output is the ingest payload as JSON, WITHOUT the API key. Use push_to_osiris
@@ -419,19 +422,22 @@ ${PROJECTION_COLUMNS_DOC}
 `,
     },
     describe_schema: {
-        summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
+        summary: '[Meta] Returns columns, indexes, type and row counts for one or more tables/views; omit `tables` for all.',
         tags: ['meta', 'sql'],
         fullDescription: `
 ### [Schema Introspection]
-Runtime schema discovery. Returns columns + indexes + row counts for the named tables.
+Runtime schema discovery. Returns columns + indexes + row counts for the named tables and views.
 
 ## Usage
-- Call with no args to enumerate every materialised table
+- Call with no args to enumerate every materialised table and view (including v_emitters, v_sites, v_links)
 - Pass { tables: ['licence', 'site'] } to drill in to specific tables
 - Virtual tables (e.g. applic_text_block_fts) appear with isVirtual: true
+- rowCount is null for views: COUNT(*) on a multi-table join view over the full
+  register is expensive, so it is skipped rather than blocking the call.
 
 ## Output
-Array of { name, columns, indexes, rowCount, isVirtual } records.`,
+Array of { name, type, columns, indexes, rowCount, isVirtual } records. type is
+'table' or 'view'; rowCount is a number for tables, null for views.`,
     },
     describe_tool: {
         summary: '[Meta] Returns the full markdown documentation for a tool by name.',
@@ -628,7 +634,7 @@ interface CachedResult {
     /**
      * Whether the cached read was cut short by the row cap. Carried so a
      * consumer can refuse to act on a partial set — without it, a truncated
-     * 500-row read is indistinguishable from a complete one.
+     * result is indistinguishable from a complete one.
      */
     truncated: boolean;
 }
@@ -675,9 +681,9 @@ function resolveResultEntry(id: string | undefined): { entry: CachedResult } | {
 }
 
 /**
- * Row ceiling for the projection path. Deliberately far above execute_sql's 500:
+ * Row ceiling for the projection path. Deliberately far above execute_sql's 5000:
  * a site-level rollup must see every device row, and at ~27 device rows per site
- * a 500-row cap reaches 18 sites. The limit that actually binds is 500 ENTITIES,
+ * a 5000-row cap reaches 185 sites. The limit that actually binds is 500 ENTITIES,
  * enforced inside generatePolybolos.
  */
 const PROJECTION_ROW_CEILING = 50_000;
@@ -713,7 +719,7 @@ async function resolveProjectionInput(
 
     const resolved = resolveResultEntry(id);
     if ('errorResponse' in resolved) return resolved;
-    // A cached result can itself have been truncated by execute_sql's 500-row cap.
+    // A cached result can itself have been truncated by execute_sql's row limit ceiling.
     return { columns: resolved.entry.columns, rows: resolved.entry.rows, truncated: resolved.entry.truncated };
 }
 
@@ -920,7 +926,7 @@ const TOOL_CATALOG = [
                 },
                 limit: {
                     type: 'number',
-                    description: 'Max rows to return (default 100, max 500)',
+                    description: 'Max rows to return (default 100, max 5000)',
                 },
             },
             required: ['sql'],
@@ -971,7 +977,7 @@ const TOOL_CATALOG = [
             type: 'object',
             properties: {
                 result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 5000-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
                 source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },
@@ -988,7 +994,7 @@ const TOOL_CATALOG = [
             type: 'object',
             properties: {
                 result_id: { type: 'string', description: 'The result_id from a previous query response' },
-                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 500-row read cap.' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 5000-row read cap.' },
                 granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
                 query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
                 source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },

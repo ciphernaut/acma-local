@@ -74,12 +74,32 @@ describe('projection row ceiling', () => {
         expect(r.truncated).toBe(true);
     });
 
-    it('does not let the projection ceiling raise the ordinary default', async () => {
-        // No maxRows argument: the 500 cap stands, whatever limit is asked for.
+    it('respects the default row ceiling when no maxRows is specified', async () => {
+        // No maxRows argument: the DEFAULT_ROW_CAP (5000) cap stands, matching the
+        // execute_sql tool's explicit limit ceiling. The 500-entity projection guarantee
+        // is still enforced in generatePolybolos, not at this row level.
         const r = await executeSqlWithTimeout(dbPath, JOIN, 5000, 25_000);
-        expect(r.rows).toHaveLength(500);
-        expect(r.truncated).toBe(true);
+        expect(r.rows).toHaveLength(1200); // all rows fit within the 5000 cap
+        expect(r.truncated).toBe(false);
     });
+
+
+    it('live execute_sql path: an over-the-cap read returns exactly 5000 rows, truncated', async () => {
+        // 6000 rows > the 5000 default ceiling. No maxRows — the same shape as the
+        // live execute_sql handler (index.ts), which is the path round 1 broke.
+        // A source-text parity check cannot catch a second clamp added elsewhere;
+        // only executing the worker can.
+        const db = new Database(dbPath);
+        db.exec('CREATE TABLE big6k(n INTEGER PRIMARY KEY)');
+        const ins = db.prepare('INSERT INTO big6k(n) VALUES (?)');
+        const tx = db.transaction(() => { for (let i = 0; i < 6000; i++) ins.run(i); });
+        tx();
+        db.close();
+
+        const result = await executeSqlWithTimeout(dbPath, 'SELECT n FROM big6k', 5000, 25_000);
+        expect(result.rows).toHaveLength(5000);
+        expect(result.truncated).toBe(true);
+    }, 30_000);
 });
 
 describe('worker parity', () => {

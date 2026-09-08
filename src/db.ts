@@ -88,6 +88,9 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
       CREATE INDEX IF NOT EXISTS device_details_licence_no_idx ON device_details(LICENCE_NO);
       CREATE INDEX IF NOT EXISTS device_details_efl_idx ON device_details(EFL_ID);
       CREATE INDEX IF NOT EXISTS device_details_related_efl_idx ON device_details(RELATED_EFL_ID);
+      CREATE INDEX IF NOT EXISTS device_freq_idx ON device_details(FREQUENCY);
+      CREATE INDEX IF NOT EXISTS device_callsign_idx ON device_details(CALL_SIGN);
+      CREATE INDEX IF NOT EXISTS device_class_idx ON device_details(CLASS_OF_STATION_CODE);
     `
   },
   "antenna": {
@@ -353,6 +356,107 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
   }
 };
 
+/**
+ * Wide read-only views for SQL-writing clients (the OSIRIS sidecar agent).
+ *
+ * Layout skeleton: id/lat/lon/label (points), id/lat_a..lon_b (lines) — the
+ * aliases OSIRIS's layer contract keys on. Friendly labels for coded values
+ * are joined here, not on the consumer side (Constraint 5: no ACMA-specific
+ * code in the generic consumer).
+ *
+ * LEFT JOINs everywhere except device→site: a row is never dropped for a
+ * missing lookup (Invariant 6) — its label columns go NULL instead. A device
+ * without a site row has nothing to draw and is the one legitimate exclusion.
+ *
+ * Two intended exclusions, named per Invariant 6 (skips must be named):
+ *  - v_emitters' device→site JOIN is INNER: 32,528 site-less devices are
+ *    dropped (2,152,837 device rows -> 2,120,309 in v_emitters, live counts).
+ *    Nothing to plot without coordinates.
+ *  - v_links' self-join requires b.SITE_ID <> a.SITE_ID: 464 registered
+ *    device pairs that share a site are dropped (a link between two points
+ *    at the same location isn't a link worth drawing).
+ *
+ * DROP + CREATE (not IF NOT EXISTS) so a full re-sync can never leave a stale
+ * definition behind.
+ */
+export const VIEW_DDL = `
+  DROP VIEW IF EXISTS v_emitters;
+  CREATE VIEW v_emitters AS
+  SELECT
+    d.SDD_ID            AS id,
+    s.LATITUDE          AS lat,
+    s.LONGITUDE         AS lon,
+    s.NAME              AS label,
+    s.SITE_ID           AS site_id,
+    s.STATE             AS state,
+    s.POSTCODE          AS postcode,
+    d.FREQUENCY         AS frequency_hz,
+    d.BANDWIDTH         AS bandwidth_hz,
+    d.TRANSMITTER_POWER AS transmitter_power_w,
+    d.EIRP              AS eirp_raw,
+    d.DEVICE_TYPE       AS device_type,
+    d.CALL_SIGN         AS call_sign,
+    d.EMISSION          AS emission,
+    m.group_name        AS modulation,
+    sn.description      AS signal_nature,
+    it.description      AS info_type,
+    cs.DESCRIPTION      AS station_class,
+    l.LICENCE_NO        AS licence_no,
+    l.STATUS_TEXT       AS licence_status,
+    ls.SV_NAME          AS service,
+    c.LICENCEE          AS licensee,
+    c.TRADING_NAME      AS trading_name
+  FROM device_details d
+  JOIN site s                          ON s.SITE_ID = d.SITE_ID
+  LEFT JOIN licence l                  ON l.LICENCE_NO = d.LICENCE_NO
+  LEFT JOIN client c                   ON c.CLIENT_NO = l.CLIENT_NO
+  LEFT JOIN licence_service ls         ON ls.SV_ID = d.SV_ID
+  LEFT JOIN emission_modulation m      ON m.code = SUBSTR(d.EMISSION, 5, 1)
+  LEFT JOIN emission_signal_nature sn  ON sn.code = SUBSTR(d.EMISSION, 6, 1)
+  LEFT JOIN emission_info_type it      ON it.code = SUBSTR(d.EMISSION, 7, 1)
+  LEFT JOIN class_of_station cs        ON cs.CODE = d.CLASS_OF_STATION_CODE;
+
+  DROP VIEW IF EXISTS v_sites;
+  CREATE VIEW v_sites AS
+  SELECT
+    s.SITE_ID        AS id,
+    s.LATITUDE       AS lat,
+    s.LONGITUDE      AS lon,
+    s.NAME           AS label,
+    s.STATE          AS state,
+    s.POSTCODE       AS postcode,
+    COUNT(d.SDD_ID)  AS device_count,
+    MIN(d.FREQUENCY) AS freq_min_hz,
+    MAX(d.FREQUENCY) AS freq_max_hz
+  FROM site s
+  LEFT JOIN device_details d ON d.SITE_ID = s.SITE_ID
+  GROUP BY s.SITE_ID;
+
+  DROP VIEW IF EXISTS v_links;
+  CREATE VIEW v_links AS
+  SELECT
+    a.SDD_ID     AS id,
+    sa.LATITUDE  AS lat_a,
+    sa.LONGITUDE AS lon_a,
+    sa.NAME      AS label_a,
+    sb.LATITUDE  AS lat_b,
+    sb.LONGITUDE AS lon_b,
+    sb.NAME      AS label_b,
+    a.SITE_ID    AS site_id_a,
+    b.SITE_ID    AS site_id_b,
+    a.FREQUENCY  AS frequency_hz,
+    ls.SV_NAME   AS service,
+    c.LICENCEE   AS licensee
+  FROM device_details a
+  JOIN device_details b        ON b.EFL_ID = a.RELATED_EFL_ID AND b.SITE_ID <> a.SITE_ID
+  JOIN site sa                 ON sa.SITE_ID = a.SITE_ID
+  JOIN site sb                 ON sb.SITE_ID = b.SITE_ID
+  LEFT JOIN licence l          ON l.LICENCE_NO = a.LICENCE_NO
+  LEFT JOIN licence_service ls ON ls.SV_ID = a.SV_ID
+  LEFT JOIN client c           ON c.CLIENT_NO = l.CLIENT_NO
+  WHERE a.SITE_ID < b.SITE_ID;
+`;
+
 export function initializeDatabase(dbPath: string) {
   const db = new Database(dbPath);
 
@@ -369,6 +473,7 @@ export function initializeDatabase(dbPath: string) {
         db.exec(table.post_load_ddl);
       }
     }
+    db.exec(VIEW_DDL);
   })();
 
   db.close();

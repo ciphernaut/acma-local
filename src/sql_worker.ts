@@ -16,7 +16,7 @@ const { dbPath, sql, limit, maxRows } = workerData as {
     dbPath: string;
     sql: string;
     limit: number;
-    /** Row ceiling for the projection path. Absent means the ordinary 500. */
+    /** Row ceiling override for the projection path. Absent means the default 5000. */
     maxRows?: number;
 };
 
@@ -64,12 +64,13 @@ function hasStatementSeparator(sql: string): boolean {
 }
 
 /**
- * Row ceiling for a result an agent will read. The projection path passes an
- * explicit, higher maxRows: rolling device rows up into site entities has to see
- * every device row, and at ~27 rows per site a 500-row cap reaches 18 sites.
- * The ceiling that matters downstream is 500 ENTITIES, enforced in the projection.
+ * Row ceiling for worker calls that don't pass maxRows — the live execute_sql tool
+ * is one (calls executeSqlWithTimeout without maxRows). Mirrors EXECUTE_SQL_MAX_LIMIT
+ * in sql.ts; the worker cannot import the TS constant, so keep both in lockstep.
+ * The projection path's own <=500 ENTITIES guarantee is enforced in the projection
+ * itself, not here.
  */
-const DEFAULT_ROW_CAP = 500;
+const DEFAULT_ROW_CAP = 5000;
 
 /**
  * Absolute ceiling on maxRows. Without it the projection ceiling is whatever a

@@ -10,6 +10,7 @@
 const { workerData, parentPort } = require('worker_threads');
 const Database = require('better-sqlite3');
 
+// maxRows: row ceiling override for the projection path. Absent means the default 5000.
 const { dbPath, sql, limit, maxRows } = workerData;
 
 // Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker
@@ -56,12 +57,13 @@ function hasStatementSeparator(sql) {
 }
 
 /**
- * Row ceiling for a result an agent will read. The projection path passes an
- * explicit, higher maxRows: rolling device rows up into site entities has to see
- * every device row, and at ~27 rows per site a 500-row cap reaches 18 sites.
- * The ceiling that matters downstream is 500 ENTITIES, enforced in the projection.
+ * Row ceiling for worker calls that don't pass maxRows — the live execute_sql tool
+ * is one (calls executeSqlWithTimeout without maxRows). Mirrors EXECUTE_SQL_MAX_LIMIT
+ * in sql.ts; the worker cannot import the TS constant, so keep both in lockstep.
+ * The projection path's own <=500 ENTITIES guarantee is enforced in the projection
+ * itself, not here.
  */
-const DEFAULT_ROW_CAP = 500;
+const DEFAULT_ROW_CAP = 5000;
 
 /**
  * Absolute ceiling on maxRows. Without it the projection ceiling is whatever a
@@ -86,7 +88,7 @@ function runQuery(dbPath, sql, limit, maxRows) {
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,
     // but we will sandbox the query inside a transaction that ALWAYS rolls back.
-    const db = new Database(dbPath);
+    const db = new Database(dbPath, { fileMustExist: true });
     db.pragma('journal_mode = WAL');
     // Increase cache to 64MB and use memory for temp tables to prevent
     // query optimizer from choosing catastrophic iteration plans on cross joins
