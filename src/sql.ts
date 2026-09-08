@@ -134,7 +134,7 @@ export function describeSchema(
 ): TableDescription[] {
     const masterRows = db.prepare(
         `SELECT name, type, sql FROM sqlite_master
-         WHERE type = 'table'
+         WHERE type IN ('table', 'view')
          ORDER BY name`
     ).all() as Array<{ name: string; type: string; sql: string | null }>;
 
@@ -390,6 +390,16 @@ FROM device_details
 WHERE SUBSTR(TRIM(EMISSION), 5, 3) = 'F3E'
 ORDER BY FREQUENCY
 LIMIT 100` },
+    { category: 'power-user', description: 'Emitters by callsign prefix, with friendly labels (uses v_emitters view)',
+      query: `select id, lat, lon, label, frequency_hz, transmitter_power_w, modulation, station_class
+                from v_emitters
+                where call_sign like 'VK4%'
+                order by id limit 100` },
+    { category: 'geospatial', description: 'Registered link pairs for one licensee (uses v_links view)',
+      query: `select id, lat_a, lon_a, lat_b, lon_b, label_a, label_b, frequency_hz
+                from v_links
+                where licensee like '%TELSTRA%'
+                order by id limit 100` },
 ];
 
 export function listSampleQueries(filter?: {

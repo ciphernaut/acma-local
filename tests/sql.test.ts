@@ -268,6 +268,13 @@ describe('describeSchema', () => {
         expect(result).toHaveLength(1);
         expect(result[0]!.isVirtual).toBe(true);
     });
+
+    test('lists the three views alongside tables', () => {
+        const db = new Database(dbPath_p2);
+        const names = describeSchema(db).map(t => t.name);
+        expect(names).toEqual(expect.arrayContaining(['v_emitters', 'v_sites', 'v_links', 'site', 'device_details']));
+        db.close();
+    });
 });
 
 describe('explainQuery', () => {
