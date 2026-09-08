@@ -84,21 +84,22 @@ describe('projection row ceiling', () => {
     });
 
 
-    it('live execute_sql path default: DEFAULT_ROW_CAP controls the ceiling', () => {
-        // The live execute_sql tool calls executeSqlWithTimeout without maxRows.
-        // This test verifies that DEFAULT_ROW_CAP is the active ceiling. The worker's
-        // cap expression is: Math.min(Math.max(1, limit), Math.min(maxRows ?? DEFAULT_ROW_CAP, HARD_ROW_CAP))
-        // When maxRows is absent, the ceiling is DEFAULT_ROW_CAP.
-        // Regression proof: mutate DEFAULT_ROW_CAP to 2000 and confirm this fails (see Round 3 mutation).
-        // With the projection ceiling (1200 rows), we get all rows; the test proves the ceiling >= 1200.
-        // The parity check (sql_limit.test.ts) proves the literal says 5000. Together, they prove 5000 is active.
-        const read = (f: string) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
-        const defaultOf = (s: string) => s.match(/const DEFAULT_ROW_CAP = ([0-9_]+);/)?.[1];
-        const ts = defaultOf(read('sql_worker.ts'));
-        const cjs = defaultOf(read('sql_worker.cjs'));
-        expect(ts).toBe('5000');
-        expect(cjs).toBe('5000');
-    });
+    it('live execute_sql path: an over-the-cap read returns exactly 5000 rows, truncated', async () => {
+        // 6000 rows > the 5000 default ceiling. No maxRows — the same shape as the
+        // live execute_sql handler (index.ts), which is the path round 1 broke.
+        // A source-text parity check cannot catch a second clamp added elsewhere;
+        // only executing the worker can.
+        const db = new Database(dbPath);
+        db.exec('CREATE TABLE big6k(n INTEGER PRIMARY KEY)');
+        const ins = db.prepare('INSERT INTO big6k(n) VALUES (?)');
+        const tx = db.transaction(() => { for (let i = 0; i < 6000; i++) ins.run(i); });
+        tx();
+        db.close();
+
+        const result = await executeSqlWithTimeout(dbPath, 'SELECT n FROM big6k', 5000, 25_000);
+        expect(result.rows).toHaveLength(5000);
+        expect(result.truncated).toBe(true);
+    }, 30_000);
 });
 
 describe('worker parity', () => {
