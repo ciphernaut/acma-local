@@ -88,6 +88,9 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
       CREATE INDEX IF NOT EXISTS device_details_licence_no_idx ON device_details(LICENCE_NO);
       CREATE INDEX IF NOT EXISTS device_details_efl_idx ON device_details(EFL_ID);
       CREATE INDEX IF NOT EXISTS device_details_related_efl_idx ON device_details(RELATED_EFL_ID);
+      CREATE INDEX IF NOT EXISTS device_freq_idx ON device_details(FREQUENCY);
+      CREATE INDEX IF NOT EXISTS device_callsign_idx ON device_details(CALL_SIGN);
+      CREATE INDEX IF NOT EXISTS device_class_idx ON device_details(CLASS_OF_STATION_CODE);
     `
   },
   "antenna": {
