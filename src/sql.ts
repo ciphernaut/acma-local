@@ -122,9 +122,14 @@ export function executeSql(
 
 export interface TableDescription {
     name: string;
+    type: 'table' | 'view';
     columns: Array<{ name: string; type: string; notnull: boolean; pk: boolean }>;
     indexes: Array<{ name: string; columns: string[]; unique: boolean }>;
-    rowCount: number;
+    /** null for views — COUNT(*) on v_emitters/v_links (multi-table joins over
+     *  2M+ device rows) takes single-digit seconds each and would block the
+     *  main thread for ~12s on a bare describe_schema call. Tables still get
+     *  a real count; PRAGMA table_info/index_list are cheap either way. */
+    rowCount: number | null;
     isVirtual: boolean;
 }
 
@@ -155,7 +160,7 @@ export function describeSchema(
         userTables = userTables.filter(r => wanted.has(r.name.toLowerCase()));
     }
 
-    return userTables.map(({ name, sql }) => {
+    return userTables.map(({ name, type, sql }) => {
         const isVirtual = sql !== null && /CREATE\s+VIRTUAL\s+TABLE/i.test(sql);
 
         const colRows = db.prepare(`PRAGMA table_info(${name})`).all() as Array<{
@@ -182,16 +187,18 @@ export function describeSchema(
                 };
             });
 
-        let rowCount = 0;
-        try {
-            const r = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number };
-            rowCount = r.n;
-        } catch {
-            // Virtual tables may not support COUNT(*) directly; leave at 0.
-            rowCount = 0;
+        let rowCount: number | null = null;
+        if (type === 'table') {
+            try {
+                const r = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number };
+                rowCount = r.n;
+            } catch {
+                // Virtual tables may not support COUNT(*) directly; leave at null.
+                rowCount = null;
+            }
         }
 
-        return { name, columns, indexes, rowCount, isVirtual };
+        return { name, type: type as 'table' | 'view', columns, indexes, rowCount, isVirtual };
     });
 }
 
@@ -464,8 +471,16 @@ export function executeSqlWithTimeout(
     maxRows?: number
 ): Promise<SqlResult> {
     return new Promise((resolve, reject) => {
-        // Prefer the pre-compiled CJS worker (runs on any Node.js without tsx/ESM).
-        // Fall back to .ts only when running directly under tsx without Jest subprocess.
+        // Resolution order: .cjs (pre-compiled, runs on any Node.js without tsx/ESM)
+        // -> .ts (running directly under tsx, e.g. `npm run dev`) -> .js (fallback;
+        // present only if something else compiled sql_worker.ts into dist/).
+        //
+        // In dist/, __dirname is dist/ and `npm run build` copies src/sql_worker.cjs
+        // there (see package.json's build script) — so production takes the FIRST
+        // branch and runs the same sql_worker.cjs that every test runs (Jest's
+        // __dirname resolves to src/, where sql_worker.cjs has always lived). Keep
+        // it that way: a stale hand-copied dist/sql_worker.cjs would otherwise take
+        // precedence over a freshly built .js and silently reintroduce an old clamp.
         const workerBase = path.join(__dirname, 'sql_worker');
         const workerScript =
             fs.existsSync(workerBase + '.cjs') ? workerBase + '.cjs'

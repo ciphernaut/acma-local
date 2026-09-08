@@ -88,7 +88,7 @@ function runQuery(dbPath, sql, limit, maxRows) {
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,
     // but we will sandbox the query inside a transaction that ALWAYS rolls back.
-    const db = new Database(dbPath);
+    const db = new Database(dbPath, { fileMustExist: true });
     db.pragma('journal_mode = WAL');
     // Increase cache to 64MB and use memory for temp tables to prevent
     // query optimizer from choosing catastrophic iteration plans on cross joins

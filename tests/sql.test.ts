@@ -275,6 +275,21 @@ describe('describeSchema', () => {
         expect(names).toEqual(expect.arrayContaining(['v_emitters', 'v_sites', 'v_links', 'site', 'device_details']));
         db.close();
     });
+
+    test('skips rowCount for views but still counts tables', () => {
+        // COUNT(*) on v_emitters/v_links is a multi-table join over the full
+        // register — expensive enough to block the main thread for seconds.
+        // Views must report their type and a null rowCount instead of paying for it.
+        const db = new Database(dbPath_p2);
+        const result = describeSchema(db, ['v_emitters', 'site']);
+        db.close();
+        const view = result.find(t => t.name === 'v_emitters')!;
+        const table = result.find(t => t.name === 'site')!;
+        expect(view.type).toBe('view');
+        expect(view.rowCount).toBeNull();
+        expect(table.type).toBe('table');
+        expect(typeof table.rowCount).toBe('number');
+    });
 });
 
 describe('explainQuery', () => {

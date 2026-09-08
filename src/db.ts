@@ -368,6 +368,14 @@ export const TABLE_METADATA: Record<string, { ddl: string; post_load_ddl?: strin
  * missing lookup (Invariant 6) — its label columns go NULL instead. A device
  * without a site row has nothing to draw and is the one legitimate exclusion.
  *
+ * Two intended exclusions, named per Invariant 6 (skips must be named):
+ *  - v_emitters' device→site JOIN is INNER: 32,528 site-less devices are
+ *    dropped (2,152,837 device rows -> 2,120,309 in v_emitters, live counts).
+ *    Nothing to plot without coordinates.
+ *  - v_links' self-join requires b.SITE_ID <> a.SITE_ID: 464 registered
+ *    device pairs that share a site are dropped (a link between two points
+ *    at the same location isn't a link worth drawing).
+ *
  * DROP + CREATE (not IF NOT EXISTS) so a full re-sync can never leave a stale
  * definition behind.
  */

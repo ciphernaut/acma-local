@@ -374,7 +374,10 @@ Projects a cached query result into Polybolos entities for the OSIRIS ingest API
 - granularity 'site' (default) emits one entity per site with devices rolled up.
   Use it for "who is transmitting near here" — it keeps pin counts low.
 - granularity 'emitter' emits one entity per device, carrying exact frequency.
-  Use it when frequency is the axis of interest.
+  Use it when frequency is the axis of interest. One entity per row means the
+  500-entity OSIRIS ceiling is also a 500-row ceiling at this granularity — with
+  execute_sql's limit now reaching 5000, an emitter-granularity result_id above
+  500 rows will be refused; narrow the query or switch to 'site' rollup instead.
 - The result must carry LATITUDE and LONGITUDE columns. Site level also needs
   SITE_ID; emitter level needs SDD_ID.
 - Output is the ingest payload as JSON, WITHOUT the API key. Use push_to_osiris
@@ -419,19 +422,22 @@ ${PROJECTION_COLUMNS_DOC}
 `,
     },
     describe_schema: {
-        summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
+        summary: '[Meta] Returns columns, indexes, type and row counts for one or more tables/views; omit `tables` for all.',
         tags: ['meta', 'sql'],
         fullDescription: `
 ### [Schema Introspection]
-Runtime schema discovery. Returns columns + indexes + row counts for the named tables.
+Runtime schema discovery. Returns columns + indexes + row counts for the named tables and views.
 
 ## Usage
-- Call with no args to enumerate every materialised table
+- Call with no args to enumerate every materialised table and view (including v_emitters, v_sites, v_links)
 - Pass { tables: ['licence', 'site'] } to drill in to specific tables
 - Virtual tables (e.g. applic_text_block_fts) appear with isVirtual: true
+- rowCount is null for views: COUNT(*) on a multi-table join view over the full
+  register is expensive, so it is skipped rather than blocking the call.
 
 ## Output
-Array of { name, columns, indexes, rowCount, isVirtual } records.`,
+Array of { name, type, columns, indexes, rowCount, isVirtual } records. type is
+'table' or 'view'; rowCount is a number for tables, null for views.`,
     },
     describe_tool: {
         summary: '[Meta] Returns the full markdown documentation for a tool by name.',
