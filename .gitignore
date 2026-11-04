@@ -21,3 +21,7 @@ docs/*.pdf
 
 # subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Local secrets (OSIRIS ingest key etc.) — never commit
+.ingest_key
+*.key

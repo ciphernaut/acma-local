@@ -467,7 +467,7 @@ export function executeSqlWithTimeout(
     dbPath: string,
     sql: string,
     limit: number = 100,
-    timeoutMs: number = 25_000,
+    timeoutMs: number = 120_000,
     maxRows?: number
 ): Promise<SqlResult> {
     return new Promise((resolve, reject) => {

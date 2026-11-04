@@ -1329,7 +1329,7 @@ function createServer(): Server {
             const sql = args?.sql as string;
             const limit = (args?.limit as number) ?? 100;
             try {
-                const result = await executeSqlWithTimeout(dbPath, sql, limit, 25_000);
+                const result = await executeSqlWithTimeout(dbPath, sql, limit, 60_000);
 
                 // Cache results for potential KML export if geospatial data detected
                 let resultId: string | undefined;
