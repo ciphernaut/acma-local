@@ -93,3 +93,12 @@ regexes = [
     # Code reading a credential from somewhere else, rather than embedding one.
     '''(?i)=\s*(args|process|os|env|config|opts|options|self|this|params)\b''',
 ]
+
+[[rules]]
+id = "acma-local-key-file"
+description = "Key/secret file committed to the repository"
+# The OSIRIS ingest key once landed as a bare 48-char token in .ingest_key: no
+# keyword, so no content rule fired. A file named like a key is the finding.
+path = '''(^|/)(\.[\w-]*key|[\w.-]+\.key|\.env(\.[\w-]+)?)$'''
+[[rules.allowlists]]
+paths = ['''(^|/)\.env\.example$''']

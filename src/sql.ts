@@ -7,6 +7,11 @@ import * as fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** Ceiling for an explicitly requested execute_sql limit. Raised from 500 for
+ *  keyset-paging clients (OSIRIS SQL layers) — a 168k-row walk at 500/page is
+ *  ~340 round trips; at 5000 it is 34. The 25s worker deadline is unchanged
+ *  and remains the real resource bound. Default limit stays 100. */
+export const EXECUTE_SQL_MAX_LIMIT = 5000;
 
 export interface SqlResult {
     columns: string[];
@@ -18,7 +23,7 @@ export interface SqlResult {
 /**
  * Execute a read-only SELECT query against the ACMA RRL database.
  * Enforces SELECT-only: any other statement type throws an error.
- * Applies a row limit (default 100, max 500).
+ * Applies a row limit (default 100, max 5000).
  */
 /**
  * True when `sql` contains a statement separator OUTSIDE of string literals,
@@ -97,7 +102,7 @@ export function executeSql(
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), 500);
+    const cap = Math.min(Math.max(1, limit), EXECUTE_SQL_MAX_LIMIT);
 
     // Wrap the query to enforce the row limit without altering user's SQL
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
@@ -117,9 +122,14 @@ export function executeSql(
 
 export interface TableDescription {
     name: string;
+    type: 'table' | 'view';
     columns: Array<{ name: string; type: string; notnull: boolean; pk: boolean }>;
     indexes: Array<{ name: string; columns: string[]; unique: boolean }>;
-    rowCount: number;
+    /** null for views — COUNT(*) on v_emitters/v_links (multi-table joins over
+     *  2M+ device rows) takes single-digit seconds each and would block the
+     *  main thread for ~12s on a bare describe_schema call. Tables still get
+     *  a real count; PRAGMA table_info/index_list are cheap either way. */
+    rowCount: number | null;
     isVirtual: boolean;
 }
 
@@ -134,7 +144,7 @@ export function describeSchema(
 ): TableDescription[] {
     const masterRows = db.prepare(
         `SELECT name, type, sql FROM sqlite_master
-         WHERE type = 'table'
+         WHERE type IN ('table', 'view')
          ORDER BY name`
     ).all() as Array<{ name: string; type: string; sql: string | null }>;
 
@@ -150,7 +160,7 @@ export function describeSchema(
         userTables = userTables.filter(r => wanted.has(r.name.toLowerCase()));
     }
 
-    return userTables.map(({ name, sql }) => {
+    return userTables.map(({ name, type, sql }) => {
         const isVirtual = sql !== null && /CREATE\s+VIRTUAL\s+TABLE/i.test(sql);
 
         const colRows = db.prepare(`PRAGMA table_info(${name})`).all() as Array<{
@@ -177,16 +187,18 @@ export function describeSchema(
                 };
             });
 
-        let rowCount = 0;
-        try {
-            const r = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number };
-            rowCount = r.n;
-        } catch {
-            // Virtual tables may not support COUNT(*) directly; leave at 0.
-            rowCount = 0;
+        let rowCount: number | null = null;
+        if (type === 'table') {
+            try {
+                const r = db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number };
+                rowCount = r.n;
+            } catch {
+                // Virtual tables may not support COUNT(*) directly; leave at null.
+                rowCount = null;
+            }
         }
 
-        return { name, columns, indexes, rowCount, isVirtual };
+        return { name, type: type as 'table' | 'view', columns, indexes, rowCount, isVirtual };
     });
 }
 
@@ -390,6 +402,16 @@ FROM device_details
 WHERE SUBSTR(TRIM(EMISSION), 5, 3) = 'F3E'
 ORDER BY FREQUENCY
 LIMIT 100` },
+    { category: 'power-user', description: 'Emitters by callsign prefix, with friendly labels (uses v_emitters view)',
+      query: `select id, lat, lon, label, frequency_hz, transmitter_power_w, modulation, station_class
+                from v_emitters
+                where call_sign like 'VK4%'
+                order by id limit 100` },
+    { category: 'geospatial', description: 'Registered link pairs for one licensee (uses v_links view)',
+      query: `select id, lat_a, lon_a, lat_b, lon_b, label_a, label_b, frequency_hz
+                from v_links
+                where licensee like '%TELSTRA%'
+                order by id limit 100` },
 ];
 
 export function listSampleQueries(filter?: {
@@ -433,18 +455,32 @@ export function listSampleQueries(filter?: {
  *
  * @param dbPath  Absolute path to the SQLite database file
  * @param sql     A SELECT statement to execute
- * @param limit   Max rows to return (default 100, max 500)
+ * @param limit   Max rows to return (default 100). Capped at EXECUTE_SQL_MAX_LIMIT unless maxRows raises it.
+
  * @param timeoutMs  Wall-clock deadline in milliseconds (default 25000)
+ * @param maxRows Row ceiling for the projection path only, and the LAST
+ *                parameter — passing it in timeoutMs's position silently turns a
+ *                row ceiling into a timeout. Absent, EXECUTE_SQL_MAX_LIMIT applies.
+ *                Hard-clamped by the worker.
  */
 export function executeSqlWithTimeout(
     dbPath: string,
     sql: string,
     limit: number = 100,
-    timeoutMs: number = 25_000
+    timeoutMs: number = 120_000,
+    maxRows?: number
 ): Promise<SqlResult> {
     return new Promise((resolve, reject) => {
-        // Prefer the pre-compiled CJS worker (runs on any Node.js without tsx/ESM).
-        // Fall back to .ts only when running directly under tsx without Jest subprocess.
+        // Resolution order: .cjs (pre-compiled, runs on any Node.js without tsx/ESM)
+        // -> .ts (running directly under tsx, e.g. `npm run dev`) -> .js (fallback;
+        // present only if something else compiled sql_worker.ts into dist/).
+        //
+        // In dist/, __dirname is dist/ and `npm run build` copies src/sql_worker.cjs
+        // there (see package.json's build script) — so production takes the FIRST
+        // branch and runs the same sql_worker.cjs that every test runs (Jest's
+        // __dirname resolves to src/, where sql_worker.cjs has always lived). Keep
+        // it that way: a stale hand-copied dist/sql_worker.cjs would otherwise take
+        // precedence over a freshly built .js and silently reintroduce an old clamp.
         const workerBase = path.join(__dirname, 'sql_worker');
         const workerScript =
             fs.existsSync(workerBase + '.cjs') ? workerBase + '.cjs'
@@ -452,7 +488,7 @@ export function executeSqlWithTimeout(
                     : workerBase + '.js';
 
         const worker = new Worker(workerScript, {
-            workerData: { dbPath, sql, limit },
+            workerData: { dbPath, sql, limit, ...(maxRows !== undefined ? { maxRows } : {}) },
             // No execArgv propagation needed — .cjs workers run without tsx
         });
 

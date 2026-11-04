@@ -80,6 +80,19 @@ must_ignore "credential read from env" 'password = args.password'
 must_ignore "documented placeholder"   'AUTH_TOKEN=your_token_here_placeholder'
 must_ignore "public ACMA endpoint"     'const MANIFEST = "https://backend.acma.gov.au/rrl/v1/Extracts";'
 
+# Path rule (acma-local-key-file): stdin has no filename, so scan a real dir.
+# A bare token in .ingest_key has no keyword for any content rule to latch onto.
+scan_file() {
+    local dir out; dir="$(mktemp -d)"
+    printf '%s\n' "$f3$f4" > "$dir/$1"
+    out="$("$GITLEAKS" dir --no-banner --redact -c "$CONFIG" "$dir" 2>&1)"; rm -rf "$dir"
+    [[ "$out" == *"leaks found: "* && "$out" != *"leaks found: 0"* ]]
+}
+if scan_file .ingest_key; then echo "  detected   key file by name"
+else echo "  MISSED     key file by name"; fail=1; fi
+if scan_file .env.example; then echo "  FALSE POS  .env.example"; fail=1
+else echo "  clean      .env.example"; fi
+
 echo
 if [ "$fail" -ne 0 ]; then
     echo "SELF-TEST FAILED — the scanner is not behaving as configured." >&2

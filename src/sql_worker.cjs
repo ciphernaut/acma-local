@@ -1,7 +1,7 @@
 /**
  * sql_worker.cjs — Worker thread entry point (CommonJS, no transpilation needed).
  *
- * Receives { dbPath, sql, limit } via workerData, opens its own read-only
+ * Receives { dbPath, sql, limit, maxRows } via workerData, opens its own read-only
  * DB connection, runs the SELECT query, and posts the result back.
  *
  * Written as plain CJS so it works without tsx/ESM loader registration.
@@ -10,7 +10,8 @@
 const { workerData, parentPort } = require('worker_threads');
 const Database = require('better-sqlite3');
 
-const { dbPath, sql, limit } = workerData;
+// maxRows: row ceiling override for the projection path. Absent means the default 5000.
+const { dbPath, sql, limit, maxRows } = workerData;
 
 // Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker
 // cannot import from there (ESM resolution differs between tsx and dist/), so the
@@ -55,7 +56,22 @@ function hasStatementSeparator(sql) {
     return false;
 }
 
-function runQuery(dbPath, sql, limit) {
+/**
+ * Row ceiling for worker calls that don't pass maxRows — the live execute_sql tool
+ * is one (calls executeSqlWithTimeout without maxRows). Mirrors EXECUTE_SQL_MAX_LIMIT
+ * in sql.ts; the worker cannot import the TS constant, so keep both in lockstep.
+ * The projection path's own <=500 ENTITIES guarantee is enforced in the projection
+ * itself, not here.
+ */
+const DEFAULT_ROW_CAP = 5000;
+
+/**
+ * Absolute ceiling on maxRows. Without it the projection ceiling is whatever a
+ * caller passes, and one bad value materialises the whole table in this worker.
+ */
+const HARD_ROW_CAP = 50000;
+
+function runQuery(dbPath, sql, limit, maxRows) {
     const trimmed = sql.trim();
     if (!trimmed) throw new Error('SQL query cannot be empty.');
 
@@ -67,12 +83,12 @@ function runQuery(dbPath, sql, limit) {
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), 500);
+    const cap = Math.min(Math.max(1, limit), Math.min(maxRows ?? DEFAULT_ROW_CAP, HARD_ROW_CAP));
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,
     // but we will sandbox the query inside a transaction that ALWAYS rolls back.
-    const db = new Database(dbPath);
+    const db = new Database(dbPath, { fileMustExist: true });
     db.pragma('journal_mode = WAL');
     // Increase cache to 64MB and use memory for temp tables to prevent
     // query optimizer from choosing catastrophic iteration plans on cross joins
@@ -105,7 +121,7 @@ function runQuery(dbPath, sql, limit) {
 }
 
 try {
-    const result = runQuery(dbPath, sql, limit);
+    const result = runQuery(dbPath, sql, limit, maxRows);
     parentPort.postMessage({ ok: true, result });
 } catch (err) {
     parentPort.postMessage({ ok: false, error: err.message });

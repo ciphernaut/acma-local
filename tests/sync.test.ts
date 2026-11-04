@@ -761,6 +761,37 @@ describe('sync() orchestrator (mocked axios)', () => {
         expect(n).toBe(18);
     });
 
+    test('forced full — rebuilds from scratch instead of appending to the old DB', async () => {
+        if (fs.existsSync(realInputsZip)) {
+            fs.renameSync(realInputsZip, realInputsZipBackup);
+        }
+
+        // Existing DB: a row the new extract no longer carries, plus one it does.
+        initializeDatabase(dbPath);
+        const seed = new Database(dbPath);
+        seed.prepare("REPLACE INTO meta (key, value) VALUES ('as_of', '2026-05-01T00:00:00Z')").run();
+        seed.prepare("INSERT INTO client (CLIENT_NO, LICENCEE) VALUES (1, 'Kept'), (99, 'Stale')").run();
+        seed.close();
+
+        axiosGetSpy.mockResolvedValueOnce({ data: manifestWithCurrentAsOf('2026-05-12T21:51:36Z') } as any);
+        const fakeZipPath = path.join(scratchDir, 'fake_full_client.zip');
+        const fakeZip = new AdmZip();
+        fakeZip.addFile('client.csv', Buffer.from('CLIENT_NO,LICENCEE\n1,Kept\n'));
+        fakeZip.writeZip(fakeZipPath);
+        const { Readable } = await import('stream');
+        axiosGetSpy.mockResolvedValueOnce({ data: Readable.from(fs.readFileSync(fakeZipPath)) } as any);
+
+        await sync(cfg, 'full');
+
+        const db = new Database(dbPath, { readonly: true });
+        const rows = db.prepare('SELECT CLIENT_NO, LICENCEE FROM client ORDER BY CLIENT_NO').all();
+        const asOf = (db.prepare("SELECT value FROM meta WHERE key = 'as_of'").get() as any).value;
+        db.close();
+        expect(rows).toEqual([{ CLIENT_NO: 1, LICENCEE: 'Kept' }]);
+        expect(asOf).toBe('2026-05-12T21:51:36Z');
+        expect(fs.existsSync(`${dbPath}.new`)).toBe(false);
+    });
+
     test('gap-exceeded — auto mode does NOT trigger full download', async () => {
         initializeDatabase(dbPath);
         const seed = new Database(dbPath);

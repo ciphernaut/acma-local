@@ -3,6 +3,8 @@
  * Supports POINT, LINESTRING, and POLYGON WKT, plus simple LATITUDE/LONGITUDE columns.
  */
 
+import type { ExportStats } from './export_stats.js';
+
 export type KmlFlavour = 'earth' | 'qgis';
 
 /**
@@ -15,6 +17,7 @@ export function generateKml(
     columns: string[],
     rows: unknown[][],
     flavour: KmlFlavour = 'earth',
+    stats?: ExportStats,
 ): string {
     const lCols = columns.map(c => c.toLowerCase());
     const latIdx = lCols.indexOf('latitude');
@@ -81,6 +84,8 @@ ${attrIdx.map(i => `          <SimpleData name="${fieldName(columns[i]!)}">${xml
       ${geometryKml}
       <styleUrl>#ACMA_style</styleUrl>
     </Placemark>`;
+        } else if (stats) {
+            stats.skipped++;   // no usable geometry: whole row abandoned
         }
     }
 

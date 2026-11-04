@@ -49,7 +49,7 @@ The local SQLite database is kept in step with ACMA via the manifest at `https:/
 
 `src/index.ts` is the entry point. It spins up an Express app exposing `POST /mcp` (initialization + RPC) and `GET /mcp` (SSE notification stream), with `Mcp-Session-Id` correlating both. Each session gets its own `StreamableHTTPServerTransport`. A 30-minute in-memory **result cache** ties `execute_sql` outputs to subsequent `export_kml` calls via `result_id`.
 
-**Tool catalog (20 tools, registered in `index.ts`):** `search_sites`, `get_site_details`, `search_licences`, `get_licence_details`, `search_clients`, `search_bsl`, `search_spectrum_band`, `search_application_text`, `get_frequency_allocation`, `decode_emission_designator`, `search_devices_by_emission`, `sync_data`, `list_sample_queries`, `execute_sql`, `explain_query`, `export_kml`, `describe_schema`, `describe_tool`, `export_geojson`, `export_qml`.
+**Tool catalog (22 tools, registered in `index.ts`):** `search_sites`, `get_site_details`, `search_licences`, `get_licence_details`, `search_clients`, `search_bsl`, `search_spectrum_band`, `search_application_text`, `get_frequency_allocation`, `decode_emission_designator`, `search_devices_by_emission`, `sync_data`, `list_sample_queries`, `execute_sql`, `explain_query`, `export_kml`, `describe_schema`, `describe_tool`, `export_geojson`, `export_qml`, `export_polybolos`, `push_to_osiris`.
 
 Each tool's `tools/list` entry is a one-line summary + capability tag; the full markdown documentation lives in the `TOOL_DOCS` map and is fetched on demand via `describe_tool(name)`. Search-style tools return `{rows, _hints?}` envelopes — `_hints` carries follow-up tool suggestions (e.g. `search_licences` → `get_licence_details`; geospatial results → `export_geojson` for a GIS layer and `export_kml` for Google Earth). `export_kml`'s `flavour: 'qgis'` is deprecated and unadvertised but still works — see `docs/geospatial-export.md`.
 
@@ -121,5 +121,7 @@ npm run scan:secrets:selftest    # prove the scanner still works
 | `ACMA_DB_PATH` | Absolute path to the SQLite DB. Defaults to `./data/acma.db`. |
 | `LOG_LEVEL` | `error` / `warn` / `info` (default) / `debug`. Routed via `src/logger.ts`. |
 | `DEBUG_NETWORK` | Legacy alias — when set, promotes `LOG_LEVEL` to `debug`. Kept working for backwards compatibility. |
+| `OSIRIS_URL` | Base origin of an OSIRIS instance for `push_to_osiris`, e.g. `http://host:3001`. Unset disables the tool. |
+| `OSIRIS_INGEST_KEY` | Shared secret for the OSIRIS Polybolos ingest endpoint. Must equal `SDK_INGEST_KEY` on that instance. |
 
 For network-exposure hardening (bearer auth, TLS, rate limiting, container packaging), see `docs/AUTH-REWORK.md`.

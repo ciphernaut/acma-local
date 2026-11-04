@@ -29,6 +29,10 @@ import { executeSqlWithTimeout, listSampleQueries, describeSchema, explainQuery 
 import { generateKml } from './kml.js';
 import { generateGeoJson } from './geojson.js';
 import { generateQml } from './qml.js';
+import { generatePolybolos, type PolybolosOptions } from './polybolos.js';
+import { pushToOsiris } from './osiris.js';
+import { validatePolybolosPayload, formatValidationReport } from './polybolos_validate.js';
+import type { ExportStats } from './export_stats.js';
 import { lookupFrequencyAllocation, spectrumSchemaIsLegacy } from './spectrum_plan.js';
 import { decodeEmissionDesignator } from './emissions.js';
 import { searchDevicesByEmission } from './emissions_search.js';
@@ -44,6 +48,26 @@ interface ToolDoc {
     tags: string[];       // ['primary'], ['geospatial'], ['fts'], ['meta'], ['sync'], ['sql'], etc.
     fullDescription: string;  // returned by describe_tool
 }
+
+/** Shared by both projection tools: one copy, so a new column is documented once. */
+const PROJECTION_COLUMNS_DOC = `
+## Columns that unlock properties
+The projection reads what your query selected, so a column you omit becomes a
+property the operator cannot filter on. Select these where you want the axis:
+- s.SITE_ID          required at site granularity (the natural key)
+- d.SDD_ID           required at emitter granularity; also enables device_count
+- s.LATITUDE, s.LONGITUDE  required always
+- s.NAME             entity label on the map
+- d.FREQUENCY        band_hf / band_vhf / band_uhf / band_shf, freq_min_hz, freq_max_hz
+- d.EMISSION         emission_class (how it is modulated: angle, amplitude, pulse),
+                     emission_info (what it carries: telephony, data, television),
+                     plus one emi_ boolean per information type present
+- ls.SV_NAME         service, plus one svc_ boolean per service present
+- l.LICENCE_TYPE_NAME, st.STATUS   licence_type and status
+Join the lookup tables (licence_service, licence_status) so these carry
+human-readable names rather than raw codes.
+Any other column you select rides along as a flat property.
+`;
 
 export const TOOL_DOCS: Record<string, ToolDoc> = {
     search_licences: {
@@ -203,7 +227,7 @@ Curated SQL examples grouped by category. Bare call returns a compact category i
 - data-dict: sqlite_master introspection`,
     },
     execute_sql: {
-        summary: '[SQL] Run a read-only SELECT/WITH query against the RRL database (max 500 rows).',
+        summary: '[SQL] Run a read-only SELECT/WITH query against the RRL database (max 5000 rows).',
         tags: ['sql'],
         fullDescription: `
 ### [SQL Query Executor]
@@ -214,14 +238,14 @@ Run a read-only SELECT or WITH (CTE) query directly against the ACMA RRL SQLite 
 - Use list_sample_queries first if unsure what to query
 - Only SELECT/WITH statements are allowed — no INSERT, UPDATE, DELETE, DROP etc.
 - Do NOT terminate the query with a semicolon. A separator outside quotes is rejected as a second statement, and a trailing ';' is a syntax error once the query is wrapped for the row limit. A ';' INSIDE a string literal or a comment is fine.
-- Results capped at 'limit' rows (default 100, max 500)
+- Results capped at 'limit' rows (default 100, max 5000)
 - If results contain geospatial columns (LATITUDE/LONGITUDE or GEOMETRY), a result_id is returned for map export via export_geojson (QGIS, web maps) or export_kml (Google Earth)
 
 ## Row limit — always check 'truncated'
-The cap is a hard 500 with no pagination. When 'truncated' is true, rows were dropped and
+The cap is 5000 rows with no pagination. When 'truncated' is true, rows were dropped and
 anything built from that result (export_kml especially) is INCOMPLETE. Aggregates are
 computed inside SQLite and are never truncated, so run a SELECT COUNT(*) first to size a
-result set before exporting it. Beyond 500 rows, aggregate or narrow the filter.
+result set before exporting it. Beyond 5000 rows, aggregate or narrow the filter.
 
 ## Output
 { columns: string[], rows: any[][], truncated: boolean, rowCount: number, result_id?: string, _hints?: ... }`,
@@ -335,20 +359,85 @@ Written against the QGIS 3.28 schema. It is XML-validated and every field it
 references is checked against the result's columns, but nothing here verifies how
 it RENDERS — there is no QGIS in the test environment.`,
     },
+    export_polybolos: {
+        summary: 'Project a cached result into Polybolos entities for an OSIRIS common operating picture. [geospatial]',
+        tags: ['geospatial', 'export'],
+        fullDescription: `
+### [Polybolos Export]
+Projects a cached query result into Polybolos entities for the OSIRIS ingest API.
+
+## Usage
+- Pass EITHER result_id (from a previous query) OR sql (projected here).
+- Use sql for whole-region rollups: execute_sql caps at 5000 rows, which reaches
+  about 185 sites at typical device density, whereas the sql path reads up to
+  50000 rows and rolls them into at most 500 entities.
+- granularity 'site' (default) emits one entity per site with devices rolled up.
+  Use it for "who is transmitting near here" — it keeps pin counts low.
+- granularity 'emitter' emits one entity per device, carrying exact frequency.
+  Use it when frequency is the axis of interest. One entity per row means the
+  500-entity OSIRIS ceiling is also a 500-row ceiling at this granularity — with
+  execute_sql's limit now reaching 5000, an emitter-granularity result_id above
+  500 rows will be refused; narrow the query or switch to 'site' rollup instead.
+- The result must carry LATITUDE and LONGITUDE columns. Site level also needs
+  SITE_ID; emitter level needs SDD_ID.
+- Output is the ingest payload as JSON, WITHOUT the API key. Use push_to_osiris
+  to send it, or save it and post it yourself.
+- Properties pass through whatever the source query selected. A code column
+  such as licence status or service type is projected as its raw ACMA code
+  (e.g. status: "1"), which the map operator sees as a filter label. JOIN
+  licence_status and licence_service in the originating query so these
+  properties carry human-readable names instead of raw codes.
+
+## Input
+- result_id: from a previous query response
+- granularity: 'site' or 'emitter'
+- query_label: short description of what this set represents, shown to the map operator
+${PROJECTION_COLUMNS_DOC}
+`,
+    },
+    push_to_osiris: {
+        summary: 'Push a cached result to an OSIRIS common operating picture as Polybolos entities. [geospatial]',
+        tags: ['geospatial', 'export'],
+        fullDescription: `
+### [Push to OSIRIS]
+Projects a cached result and pushes it to an OSIRIS instance's Polybolos ingest
+endpoint, so the rows appear on its map.
+
+## Usage
+- Pass EITHER result_id OR sql. The sql path reads up to 50000 rows, so a whole
+  region can be rolled up in one call; a partial read is refused rather than pushed.
+- Requires OSIRIS_URL and OSIRIS_INGEST_KEY in the server environment. The key
+  must equal the SDK_INGEST_KEY configured on the OSIRIS side.
+- Entity ids are natural keys, so pushing the same area twice updates the
+  existing entities rather than duplicating them.
+- OSIRIS has no delete endpoint and its stream serves at most 500 entities, so
+  the projection refuses a set larger than that. Narrow the query instead.
+- Returns how many entities OSIRIS accepted and rejected.
+
+## Input
+- result_id: from a previous query response
+- granularity: 'site' (default) or 'emitter'
+- query_label: short description of what this set represents, shown to the map operator
+${PROJECTION_COLUMNS_DOC}
+`,
+    },
     describe_schema: {
-        summary: '[Meta] Returns columns, indexes, row counts for one or more tables; omit `tables` for all.',
+        summary: '[Meta] Returns columns, indexes, type and row counts for one or more tables/views; omit `tables` for all.',
         tags: ['meta', 'sql'],
         fullDescription: `
 ### [Schema Introspection]
-Runtime schema discovery. Returns columns + indexes + row counts for the named tables.
+Runtime schema discovery. Returns columns + indexes + row counts for the named tables and views.
 
 ## Usage
-- Call with no args to enumerate every materialised table
+- Call with no args to enumerate every materialised table and view (including v_emitters, v_sites, v_links)
 - Pass { tables: ['licence', 'site'] } to drill in to specific tables
 - Virtual tables (e.g. applic_text_block_fts) appear with isVirtual: true
+- rowCount is null for views: COUNT(*) on a multi-table join view over the full
+  register is expensive, so it is skipped rather than blocking the call.
 
 ## Output
-Array of { name, columns, indexes, rowCount, isVirtual } records.`,
+Array of { name, type, columns, indexes, rowCount, isVirtual } records. type is
+'table' or 'view'; rowCount is a number for tables, null for views.`,
     },
     describe_tool: {
         summary: '[Meta] Returns the full markdown documentation for a tool by name.',
@@ -542,13 +631,19 @@ interface CachedResult {
     columns: string[];
     rows: unknown[][];
     expires: number;
+    /**
+     * Whether the cached read was cut short by the row cap. Carried so a
+     * consumer can refuse to act on a partial set — without it, a truncated
+     * result is indistinguishable from a complete one.
+     */
+    truncated: boolean;
 }
 
 const resultCache = new Map<string, CachedResult>();
 
-function cacheResult(columns: string[], rows: unknown[][]): string {
+function cacheResult(columns: string[], rows: unknown[][], truncated = false): string {
     const id = randomUUID();
-    resultCache.set(id, { columns, rows, expires: Date.now() + 30 * 60 * 1000 });
+    resultCache.set(id, { columns, rows, truncated, expires: Date.now() + 30 * 60 * 1000 });
     return id;
 }
 
@@ -559,6 +654,74 @@ setInterval(() => {
         if (now > entry.expires) resultCache.delete(id);
     }
 }, 300_000).unref();
+
+type ToolResponse = { content: Array<{ type: 'text'; text: string }>; isError?: true };
+
+/**
+ * Shared entry point for every exporter handler (export_kml, export_geojson,
+ * export_qml, export_polybolos, push_to_osiris): validates result_id is
+ * present, looks it up in the cache, and returns either the cached entry or
+ * the standard error response — so the four/five handlers don't each hand-roll
+ * the same two checks and the same wording.
+ */
+function resolveResultEntry(id: string | undefined): { entry: CachedResult } | { errorResponse: ToolResponse } {
+    if (!id) {
+        return { errorResponse: { content: [{ type: 'text', text: 'Missing required parameter: result_id' }], isError: true } };
+    }
+    const entry = resultCache.get(id);
+    if (!entry) {
+        return {
+            errorResponse: {
+                content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
+                isError: true,
+            },
+        };
+    }
+    return { entry };
+}
+
+/**
+ * Row ceiling for the projection path. Deliberately far above execute_sql's 5000:
+ * a site-level rollup must see every device row, and at ~27 device rows per site
+ * a 5000-row cap reaches 185 sites. The limit that actually binds is 500 ENTITIES,
+ * enforced inside generatePolybolos.
+ */
+const PROJECTION_ROW_CEILING = 50_000;
+
+/**
+ * Projection input from EITHER a cached result_id or a SQL query run here.
+ * The SQL path exists because rolling device rows up into sites needs far more
+ * rows than a result an agent reads; see docs/osiris-bridge-reference.md.
+ */
+async function resolveProjectionInput(
+    args: Record<string, unknown> | undefined,
+): Promise<{ columns: string[]; rows: unknown[][]; truncated: boolean } | { errorResponse: ToolResponse }> {
+    const id = typeof args?.result_id === 'string' ? args.result_id : undefined;
+    const sql = typeof args?.sql === 'string' ? args.sql : undefined;
+
+    if (id && sql) {
+        return { errorResponse: { content: [{ type: 'text', text: 'Pass either result_id or sql, not both.' }], isError: true } };
+    }
+    if (!id && !sql) {
+        return { errorResponse: { content: [{ type: 'text', text: 'Missing required parameter: pass result_id (from a previous query) or sql (projected here, up to 50000 rows).' }], isError: true } };
+    }
+
+    if (sql) {
+        // A rejected query (bad SQL, non-SELECT, timeout) must come back as a tool
+        // error like every other path in this file, not escape as a JSON-RPC fault.
+        try {
+            const r = await executeSqlWithTimeout(dbPath, sql, PROJECTION_ROW_CEILING, 60_000, PROJECTION_ROW_CEILING);
+            return { columns: r.columns, rows: r.rows, truncated: r.truncated };
+        } catch (e) {
+            return { errorResponse: { content: [{ type: 'text', text: `SQL Error: ${e instanceof Error ? e.message : String(e)}` }], isError: true } };
+        }
+    }
+
+    const resolved = resolveResultEntry(id);
+    if ('errorResponse' in resolved) return resolved;
+    // A cached result can itself have been truncated by execute_sql's row limit ceiling.
+    return { columns: resolved.entry.columns, rows: resolved.entry.rows, truncated: resolved.entry.truncated };
+}
 
 /**
  * Detects whether a result set contains geospatial data (lat/lng or geometry columns).
@@ -574,6 +737,21 @@ function hasGeospatialData(columns: string[]): boolean {
 
 function openDb() {
     return new Database(dbPath, { readonly: true });
+}
+
+/** meta.as_of — how fresh the mirror is. Null when the table is absent or empty. */
+function readAsOf(): string | null {
+    try {
+        const db = openDb();
+        try {
+            const row = db.prepare("SELECT value FROM meta WHERE key = 'as_of'").get() as { value?: string } | undefined;
+            return row?.value ?? null;
+        } finally {
+            db.close();
+        }
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -748,7 +926,7 @@ const TOOL_CATALOG = [
                 },
                 limit: {
                     type: 'number',
-                    description: 'Max rows to return (default 100, max 500)',
+                    description: 'Max rows to return (default 100, max 5000)',
                 },
             },
             required: ['sql'],
@@ -790,6 +968,40 @@ const TOOL_CATALOG = [
                 fields: { type: 'array', items: { type: 'string' }, description: 'Subset of columns for the map tip (default: all)' },
             },
             required: ['result_id'],
+        },
+    },
+    {
+        name: 'export_polybolos',
+        description: TOOL_DOCS.export_polybolos!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 5000-row read cap.' },
+                granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
+                query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
+                source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },
+            },
+            // one of result_id / sql is required; enforced in the handler so the
+                // error can name both options rather than a schema violation.
+
+        },
+    },
+    {
+        name: 'push_to_osiris',
+        description: TOOL_DOCS.push_to_osiris!.summary,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                result_id: { type: 'string', description: 'The result_id from a previous query response' },
+                sql: { type: 'string', description: 'A SELECT/WITH query projected directly, up to 50000 rows. Use instead of result_id for whole-region rollups that exceed the 5000-row read cap.' },
+                granularity: { type: 'string', enum: ['site', 'emitter'], description: "'site' (default) rolls devices up per site; 'emitter' is one entity per device" },
+                query_label: { type: 'string', description: 'Short description of what this set represents, shown to the map operator' },
+                source: { type: 'string', description: 'Producer tag, default acma-rrl. OSIRIS scopes its DELETE endpoint by source, so use a distinct one for a test set pushed alongside a live estate.' },
+            },
+            // one of result_id / sql is required; enforced in the handler so the
+                // error can name both options rather than a schema violation.
+
         },
     },
     {
@@ -898,7 +1110,10 @@ function createServer(): Server {
                     const columns = Object.keys(result.devices[0] as object);
                     if (hasGeospatialData(columns)) {
                         const rows = result.devices.map(r => columns.map(c => (r as any)[c]));
-                        resultId = cacheResult(columns, rows);
+                        // getLicenceDetails caps devices at 50 (src/logic.ts). Hitting the
+                        // cap may mean more exist, so flag it rather than let a partial set
+                        // reach push_to_osiris looking complete.
+                        resultId = cacheResult(columns, rows, result.devices.length >= 50);
                     }
                 }
 
@@ -909,6 +1124,7 @@ function createServer(): Server {
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
                         { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
+                        { tool: 'export_polybolos', args: { result_id: resultId }, why: 'OSIRIS map layer: push this set to the common operating picture' },
                     ];
                 }
 
@@ -919,7 +1135,8 @@ function createServer(): Server {
         if (name === 'search_sites') {
             const db = openDb();
             try {
-                const rows = searchSites(db, args?.query as string, (args?.limit as number) ?? 10) as any[];
+                const searchLimit = (args?.limit as number) ?? 10;
+                const rows = searchSites(db, args?.query as string, searchLimit) as any[];
 
                 // Cache results for potential KML export
                 let resultId: string | undefined;
@@ -927,7 +1144,8 @@ function createServer(): Server {
                     const columns = Object.keys(rows[0] as object);
                     if (hasGeospatialData(columns)) {
                         const rowArrays = rows.map(r => columns.map(c => (r as any)[c]));
-                        resultId = cacheResult(columns, rowArrays);
+                        // A full page back from a LIMITed search may be a cut result.
+                        resultId = cacheResult(columns, rowArrays, rows.length >= searchLimit);
                     }
                 }
 
@@ -955,7 +1173,8 @@ function createServer(): Server {
                 const columns = Object.keys(result.site as object);
                 if (hasGeospatialData(columns)) {
                     const rows = [columns.map(c => (result.site as any)[c])];
-                    resultId = cacheResult(columns, rows);
+                    // Exactly one site record by construction — never truncated.
+                    resultId = cacheResult(columns, rows, false);
                 }
 
                 const response: any = { ...result };
@@ -965,6 +1184,7 @@ function createServer(): Server {
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
                         { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
+                        { tool: 'export_polybolos', args: { result_id: resultId }, why: 'OSIRIS map layer: push this set to the common operating picture' },
                     ];
                 }
 
@@ -1109,12 +1329,12 @@ function createServer(): Server {
             const sql = args?.sql as string;
             const limit = (args?.limit as number) ?? 100;
             try {
-                const result = await executeSqlWithTimeout(dbPath, sql, limit, 25_000);
+                const result = await executeSqlWithTimeout(dbPath, sql, limit, 60_000);
 
                 // Cache results for potential KML export if geospatial data detected
                 let resultId: string | undefined;
                 if (result.rowCount > 0 && hasGeospatialData(result.columns)) {
-                    resultId = cacheResult(result.columns, result.rows);
+                    resultId = cacheResult(result.columns, result.rows, result.truncated);
                 }
 
                 const response: any = { ...result };
@@ -1124,6 +1344,7 @@ function createServer(): Server {
                         { tool: 'export_geojson', args: { result_id: resultId }, why: 'render as a GIS layer (QGIS, web maps)' },
                         { tool: 'export_kml', args: { result_id: resultId }, why: 'render for Google Earth' },
                         { tool: 'export_qml', args: { result_id: resultId }, why: 'QGIS style: labels and a hover map tip' },
+                        { tool: 'export_polybolos', args: { result_id: resultId }, why: 'OSIRIS map layer: push this set to the common operating picture' },
                     ];
                 }
 
@@ -1137,72 +1358,138 @@ function createServer(): Server {
         }
 
         if (name === 'export_kml') {
-            const id = args?.result_id as string;
-            if (!id) {
-                return {
-                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
-                    isError: true,
-                };
-            }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
+            const id = args?.result_id as string | undefined;
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
             const flavour = args?.flavour === 'qgis' ? 'qgis' : 'earth';
             if (flavour === 'qgis') {
                 log.warn("[KML] flavour='qgis' is deprecated and no longer advertised; " +
                          'use export_geojson for QGIS and web maps');
             }
-            const kml = generateKml(entry.columns, entry.rows, flavour);
-            return {
-                content: [{ type: 'text', text: kml }]
-            };
+            const stats: ExportStats = { skipped: 0 };
+            const kml = generateKml(entry.columns, entry.rows, flavour, stats);
+            const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: kml }];
+            if (stats.skipped > 0) {
+                content.push({
+                    type: 'text',
+                    text: `Note: ${stats.skipped} row(s) had no usable coordinates and were omitted from the export.`,
+                });
+            }
+            return { content };
         }
 
         if (name === 'export_geojson') {
             const id = args?.result_id as string | undefined;
-            if (!id) {
-                return {
-                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
-                    isError: true,
-                };
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
+            const stats: ExportStats = { skipped: 0 };
+            const doc = generateGeoJson(entry.columns, entry.rows, stats);
+            const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
+            if (stats.skipped > 0) {
+                content.push({
+                    type: 'text',
+                    text: `Note: ${stats.skipped} row(s) had no usable coordinates and were omitted from the export.`,
+                });
             }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
-            return {
-                content: [{ type: 'text', text: generateGeoJson(entry.columns, entry.rows) }]
-            };
+            return { content };
         }
 
         if (name === 'export_qml') {
             const id = args?.result_id as string | undefined;
-            if (!id) {
-                return {
-                    content: [{ type: 'text', text: 'Missing required parameter: result_id' }],
-                    isError: true,
-                };
-            }
-            const entry = resultCache.get(id);
-            if (!entry) {
-                return {
-                    content: [{ type: 'text', text: `Result not found or expired (result_id: ${id}). Please re-run the original query to get a fresh result_id.` }],
-                    isError: true,
-                };
-            }
+            const resolved = resolveResultEntry(id);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const { entry } = resolved;
             const opts: { labelField?: string; fields?: string[] } = {};
             if (typeof args?.label_field === 'string') opts.labelField = args.label_field;
             if (Array.isArray(args?.fields)) opts.fields = (args.fields as unknown[]).map(String);
-            return {
-                content: [{ type: 'text', text: generateQml(entry.columns, entry.rows, opts) }]
-            };
+            const stats: ExportStats = { skipped: 0 };
+            const doc = generateQml(entry.columns, entry.rows, opts, stats);
+            const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
+            if (stats.skipped > 0) {
+                content.push({
+                    type: 'text',
+                    text: `Note: ${stats.skipped} row(s) had no usable coordinates and were omitted from the export.`,
+                });
+            }
+            return { content };
+        }
+
+        if (name === 'export_polybolos') {
+            const resolved = await resolveProjectionInput(args);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const opts: PolybolosOptions = {};
+            if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
+            if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
+            if (typeof args?.source === 'string') opts.source = args.source;
+            const asOf = readAsOf();
+            if (asOf) opts.asOf = asOf;
+
+            const stats: ExportStats = { skipped: 0 };
+            try {
+                const doc = generatePolybolos(resolved.columns, resolved.rows, opts, stats);
+                const content: Array<{ type: 'text'; text: string }> = [{ type: 'text', text: doc }];
+                if (stats.skipped > 0) {
+                    content.push({ type: 'text', text: `Note: ${stats.skipped} row(s) could not be projected and were omitted.` });
+                }
+                if (resolved.truncated) {
+                    content.push({ type: 'text', text: `Warning: the query hit the ${PROJECTION_ROW_CEILING}-row projection ceiling and was cut. The entities above are projected from a PARTIAL result — narrow the query before trusting them.` });
+                }
+                return { content };
+            } catch (e) {
+                return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
+            }
+        }
+
+        if (name === 'push_to_osiris') {
+            const resolved = await resolveProjectionInput(args);
+            if ('errorResponse' in resolved) return resolved.errorResponse;
+            const opts: PolybolosOptions = {};
+            if (args?.granularity === 'site' || args?.granularity === 'emitter') opts.granularity = args.granularity;
+            if (typeof args?.query_label === 'string') opts.queryLabel = args.query_label;
+            if (typeof args?.source === 'string') opts.source = args.source;
+            const asOf = readAsOf();
+            if (asOf) opts.asOf = asOf;
+
+            // Checked BEFORE projecting: otherwise an over-ceiling projection throws
+            // first and the caller is told to narrow for the ENTITY limit while never
+            // learning the read itself was cut — they could narrow and still push a
+            // partial set.
+            if (resolved.truncated) {
+                return {
+                    content: [{ type: 'text', text: `Refusing to push: the read was cut short by a row cap, so this result is partial. Narrow the query — pushing a fragment gives the operator no way to tell it is one.` }],
+                    isError: true,
+                };
+            }
+
+            const stats: ExportStats = { skipped: 0 };
+            try {
+                const doc = generatePolybolos(resolved.columns, resolved.rows, opts, stats);
+                // F6: the contract checker is the whole point of having one — run it
+                // on the way out, not only in Jest.
+                const verdict = validatePolybolosPayload(doc);
+                if (!verdict.ok) {
+                    return {
+                        content: [{ type: 'text', text: `Refusing to push: the projected payload fails the Polybolos contract.\n\n${formatValidationReport(verdict)}` }],
+                        isError: true,
+                    };
+                }
+                const result = await pushToOsiris(doc);
+                const content: Array<{ type: 'text'; text: string }> = [{
+                    type: 'text',
+                    text: JSON.stringify({ ...result, skipped: stats.skipped }, null, 2),
+                }];
+                // Warnings are not fatal but must not vanish: a duplicate id means
+                // OSIRIS keeps only the last, so the operator sees fewer pins than
+                // this response reports.
+                if (verdict.warnings.length > 0) {
+                    content.push({ type: 'text', text: formatValidationReport(verdict) });
+                }
+                return { content };
+            } catch (e) {
+                return { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true };
+            }
         }
 
         if (name === 'get_frequency_allocation') {

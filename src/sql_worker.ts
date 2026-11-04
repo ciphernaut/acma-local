@@ -12,10 +12,12 @@
 import { workerData, parentPort } from 'worker_threads';
 import Database from 'better-sqlite3';
 
-const { dbPath, sql, limit } = workerData as {
+const { dbPath, sql, limit, maxRows } = workerData as {
     dbPath: string;
     sql: string;
     limit: number;
+    /** Row ceiling override for the projection path. Absent means the default 5000. */
+    maxRows?: number;
 };
 
 // Kept textually in sync with hasStatementSeparator() in src/sql.ts — the worker
@@ -61,7 +63,22 @@ function hasStatementSeparator(sql: string): boolean {
     return false;
 }
 
-function runQuery(dbPath: string, sql: string, limit: number) {
+/**
+ * Row ceiling for worker calls that don't pass maxRows — the live execute_sql tool
+ * is one (calls executeSqlWithTimeout without maxRows). Mirrors EXECUTE_SQL_MAX_LIMIT
+ * in sql.ts; the worker cannot import the TS constant, so keep both in lockstep.
+ * The projection path's own <=500 ENTITIES guarantee is enforced in the projection
+ * itself, not here.
+ */
+const DEFAULT_ROW_CAP = 5000;
+
+/**
+ * Absolute ceiling on maxRows. Without it the projection ceiling is whatever a
+ * caller passes, and one bad value materialises the whole table in this worker.
+ */
+const HARD_ROW_CAP = 50_000;
+
+function runQuery(dbPath: string, sql: string, limit: number, maxRows?: number) {
     const trimmed = sql.trim();
     if (!trimmed) throw new Error('SQL query cannot be empty.');
 
@@ -73,7 +90,7 @@ function runQuery(dbPath: string, sql: string, limit: number) {
         );
     }
 
-    const cap = Math.min(Math.max(1, limit), 500);
+    const cap = Math.min(Math.max(1, limit), Math.min(maxRows ?? DEFAULT_ROW_CAP, HARD_ROW_CAP));
     const wrapped = `SELECT * FROM (${trimmed}) LIMIT ${cap + 1}`;
 
     // Open the DB normally (not readonly) so we don't trip over WAL file writes,
@@ -111,7 +128,7 @@ function runQuery(dbPath: string, sql: string, limit: number) {
 }
 
 try {
-    const result = runQuery(dbPath, sql, limit);
+    const result = runQuery(dbPath, sql, limit, maxRows);
     parentPort!.postMessage({ ok: true, result });
 } catch (err: any) {
     parentPort!.postMessage({ ok: false, error: err.message });
