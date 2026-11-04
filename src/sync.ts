@@ -394,6 +394,34 @@ async function downloadFile(url: string, targetPath: string): Promise<void> {
  * Takes the full ExtractEntry from the manifest as input — the URL and the
  * authoritative as_of timestamp both come from there.
  */
+const DB_SIDECARS = ['', '-wal', '-shm'];
+
+function removeDbFiles(dbPath: string): void {
+    for (const suffix of DB_SIDECARS) fs.rmSync(`${dbPath}${suffix}`, { force: true });
+}
+
+/**
+ * Atomically replace the DB at `livePath` with the fully-built one at `buildPath`.
+ * The old DB's WAL is checkpointed first so dropping its sidecars loses nothing;
+ * connections already open keep reading the old inode until they close.
+ */
+function swapInDb(buildPath: string, livePath: string): void {
+    if (fs.existsSync(livePath)) {
+        const old = new Database(livePath);
+        try {
+            old.pragma('wal_checkpoint(TRUNCATE)');
+        } finally {
+            old.close();
+        }
+    }
+    fs.renameSync(buildPath, livePath);
+    // ponytail: a connection opening between rename and unlink can pick up the old
+    // sidecars; harmless because the TRUNCATE checkpoint left that WAL empty. Add a
+    // lock file if concurrent writers during a full sync ever become a thing.
+    for (const suffix of ['-wal', '-shm']) fs.rmSync(`${livePath}${suffix}`, { force: true });
+    removeDbFiles(buildPath);
+}
+
 export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntry): Promise<void> {
     if (currentSyncStatus.isSyncing) {
         throw new Error('Synchronization already in progress');
@@ -444,8 +472,15 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
 
         currentSyncStatus.progress = 30;
 
+        // Build into a sibling file and swap it in at the end, so a full sync is a
+        // ground-up rebuild: the RRL tables have no PKs, so importing into the live
+        // DB would append a second copy of every row. Readers keep the old DB until
+        // the swap, and a failed rebuild leaves it untouched.
+        const buildPath = `${config.dbPath}.new`;
+        removeDbFiles(buildPath);
+
         log.info('Initializing database...');
-        initializeDatabase(config.dbPath);
+        initializeDatabase(buildPath);
 
         const tablesToImport = files.filter(file => {
             const fileName = path.basename(file);
@@ -466,7 +501,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
             // across `tablesToImport.length` files. Within each file's slice, `p`
             // (0..100 from importCsv) advances progress by `sliceSize` points.
             const sliceSize = 65 / tablesToImport.length;
-            await importCsv(file, config.dbPath, targetTable, (p) => {
+            await importCsv(file, buildPath, targetTable, (p) => {
                 currentSyncStatus.progress = Math.round(tableProgressBase + (p / 100) * sliceSize);
             });
         }
@@ -474,7 +509,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         // Rebuild the FTS5 index over the freshly-imported applic_text_block rows.
         // External-content FTS5 requires an explicit rebuild after bulk import.
         log.info('Rebuilding FTS5 index over applic_text_block...');
-        const ftsDb = new Database(config.dbPath);
+        const ftsDb = new Database(buildPath);
         try {
             ftsDb.exec(`INSERT INTO applic_text_block_fts(applic_text_block_fts) VALUES('rebuild');`);
         } finally {
@@ -484,7 +519,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         // Refresh query planner statistics. ANALYZE on the 22-table corpus
         // completes in a few seconds; cheap insurance for downstream queries.
         log.info('Running ANALYZE for query planner...');
-        const anDb = new Database(config.dbPath);
+        const anDb = new Database(buildPath);
         try {
             anDb.exec('ANALYZE;');
         } finally {
@@ -496,7 +531,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         // so it works regardless of where the runtime DB lives.
         const seedDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'seed');
         const seedPath = path.join(seedDir, 'spectrum_plan.sql');
-        const bsDb = new Database(config.dbPath);
+        const bsDb = new Database(buildPath);
         try {
             bootstrapSpectrumPlan(bsDb, seedPath);
             bootstrapEmissionTables(bsDb, path.join(seedDir, 'emissions.sql'));
@@ -504,7 +539,7 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
             bsDb.close();
         }
 
-        const db = new Database(config.dbPath);
+        const db = new Database(buildPath);
         try {
             const fullSyncStamp = new Date().toISOString();
             db.prepare('REPLACE INTO meta (key, value) VALUES (?, ?)').run('as_of', fullEntry.LastMdified);
@@ -513,6 +548,15 @@ export async function performFullSync(config: SyncConfig, fullEntry: ExtractEntr
         } finally {
             db.close();
         }
+
+        // Fold the WAL into the main file so the rename moves a complete DB.
+        const ckDb = new Database(buildPath);
+        try {
+            ckDb.pragma('wal_checkpoint(TRUNCATE)');
+        } finally {
+            ckDb.close();
+        }
+        swapInDb(buildPath, config.dbPath);
 
         currentSyncStatus.progress = 100;
         log.info('Full sync complete.');
